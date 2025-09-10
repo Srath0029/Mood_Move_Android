@@ -12,6 +12,6 @@ import androidx.compose.ui.Modifier
 @Composable
 fun LoginScreen()    {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("login Screen", style = MaterialTheme.typography.headlineMedium)
+        Text("Check", style = MaterialTheme.typography.headlineMedium)
     }
 }
