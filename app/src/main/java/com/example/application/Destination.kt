@@ -12,6 +12,7 @@ enum class Destination(
     val showInSideRail: Boolean
 ) {
     LOGIN("login", "Login", Icons.Filled.CheckCircle, false, true),
+    REGISTER("register", "Register", Icons.Filled.AddCircle, false, false),
     HOME("home", "Home", Icons.Filled.Home, true, true),
     LOG("log", "Log", Icons.Filled.Edit, true, true),            // Log form
     HISTORY("history", "History", Icons.Filled.Build, true, true),

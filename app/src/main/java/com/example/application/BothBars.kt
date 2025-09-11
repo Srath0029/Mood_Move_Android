@@ -33,7 +33,7 @@ fun RailAndBottomBarTogether() {
     val BrandOnPurpleFaded = Color.White.copy(alpha = 0.80f)
     val BrandIndicator = Color.White.copy(alpha = 0.20f)
 
-    // What to show where
+    // Side rail items (no Register per your spec)
     val railItems = listOf(
         Destination.LOGIN,
         Destination.HOME,
@@ -42,6 +42,8 @@ fun RailAndBottomBarTogether() {
         Destination.INSIGHTS,
         Destination.SETTINGS
     )
+
+    // Bottom bar items (use what you currently have)
     val bottomItems = listOf(
         Destination.HOME,
         Destination.LOG,
@@ -121,6 +123,7 @@ fun RailAndBottomBarTogether() {
                 )
             },
             bottomBar = {
+                // Always show bottom bar, including on Login/Register
                 NavigationBar(containerColor = BrandPurple) {
                     bottomItems.forEach { dest ->
                         NavigationBarItem(
@@ -150,10 +153,29 @@ fun RailAndBottomBarTogether() {
         ) { innerPadding ->
             NavHost(
                 navController = navController,
-                startDestination = Destination.HOME.route, // keep HOME as start for post-login demo
+                startDestination = Destination.HOME.route, // set to LOGIN if you want to start there
                 modifier = Modifier.padding(innerPadding)
             ) {
-                composable(Destination.LOGIN.route)    { LoginScreen() }
+                // LOGIN → “Register” link
+                composable(Destination.LOGIN.route) {
+                    LoginScreen(
+                        onGoRegister = {
+                            navController.navigate(Destination.REGISTER.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    )
+                }
+
+                // REGISTER → “Sign in” link
+                composable(Destination.REGISTER.route) {
+                    RegisterScreen(
+                        onGoLogin = {
+                            navController.popBackStack() // back to Login
+                        }
+                    )
+                }
+
                 composable(Destination.HOME.route)     { HomeScreen() }
                 composable(Destination.LOG.route)      { LogScreen() }
                 composable(Destination.HISTORY.route)  { HistoryScreen() }
@@ -163,4 +185,3 @@ fun RailAndBottomBarTogether() {
         }
     }
 }
-

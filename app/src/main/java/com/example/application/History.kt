@@ -1,16 +1,351 @@
 package com.example.application
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+// --- Data model for history ---
+data class LogEntry(
+    val id: Long,
+    val dateMillis: Long,
+    val mood: Int,       // 1..5 (Very sad .. Very happy)
+    val type: String,    // Walk / Run / Cycling / ...
+    val minutes: Int
+)
+
+private enum class SortOption(val label: String) {
+    NEWEST("Newest first"),
+    OLDEST("Oldest first"),
+    DURATION("Longest duration")
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryScreen(
+    // Optional hooks if you want to navigate to Log with prefill
+    onEdit: (LogEntry) -> Unit = {},
+    onView: (LogEntry) -> Unit = {}
+) {
+    // Demo list (replace with Room later)
+    val initial = remember { mutableStateListOf<LogEntry>().apply { addAll(sampleLogs()) } }
+
+    // Search + filters
+    var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(SortOption.NEWEST) }
+
+    var fromOpen by remember { mutableStateOf(false) }
+    var toOpen by remember { mutableStateOf(false) }
+    var fromMillis by rememberSaveable { mutableStateOf<Long?>(null) }
+    var toMillis by rememberSaveable { mutableStateOf<Long?>(null) }
+    val fromState = rememberDatePickerState(initialSelectedDateMillis = fromMillis)
+    val toState = rememberDatePickerState(initialSelectedDateMillis = toMillis)
+
+    // View & delete dialogs
+    var viewing by remember { mutableStateOf<LogEntry?>(null) }
+    var deleting by remember { mutableStateOf<LogEntry?>(null) }
+
+    val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
+    fun formatDate(ms: Long?): String =
+        ms?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
+        } ?: "Any"
+
+    // Filtering + sorting
+    val filteredSorted = remember(query, fromMillis, toMillis, sort, initial) {
+        initial
+            .asSequence()
+            .filter { e ->
+                val matchesQuery =
+                    query.isBlank() ||
+                            e.type.contains(query, ignoreCase = true) ||
+                            formatDate(e.dateMillis).contains(query, ignoreCase = true)
+                val afterFrom = fromMillis?.let { e.dateMillis >= it } ?: true
+                val beforeTo = toMillis?.let { e.dateMillis <= it } ?: true
+                matchesQuery && afterFrom && beforeTo
+            }
+            .sortedWith(
+                when (sort) {
+                    SortOption.NEWEST -> compareByDescending<LogEntry> { it.dateMillis }
+                    SortOption.OLDEST -> compareBy { it.dateMillis }
+                    SortOption.DURATION -> compareByDescending { it.minutes }
+                }
+            )
+            .toList()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Top,      // 垂直方向的布局策略
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text("History", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(12.dp))
+
+        // Search
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Search (type/date)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // Filters row: From / To date + Sort
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // From date
+            Column(Modifier.weight(1f)) {
+                Text("From", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                OutlinedButton(
+                    onClick = { fromOpen = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(formatDate(fromMillis)) }
+            }
+
+            // To date
+            Column(Modifier.weight(1f)) {
+                Text("To", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                OutlinedButton(
+                    onClick = { toOpen = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(formatDate(toMillis)) }
+            }
+
+            // Sort
+            SortMenu(
+                current = sort,
+                onChange = { sort = it },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // List
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(filteredSorted, key = { it.id }) { entry ->
+                HistoryRow(
+                    entry = entry,
+                    onView = { viewing = it; onView(it) },
+                    onEdit = onEdit,
+                    onDelete = { deleting = it }
+                )
+            }
+            item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+
+    // Date pickers
+    if (fromOpen) {
+        DatePickerDialog(
+            onDismissRequest = { fromOpen = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    fromMillis = fromState.selectedDateMillis
+                    fromOpen = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { fromOpen = false }) { Text("Cancel") } }
+        ) { DatePicker(state = fromState, showModeToggle = true) }
+    }
+    if (toOpen) {
+        DatePickerDialog(
+            onDismissRequest = { toOpen = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    toMillis = toState.selectedDateMillis
+                    toOpen = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { toOpen = false }) { Text("Cancel") } }
+        ) { DatePicker(state = toState, showModeToggle = true) }
+    }
+
+    // View dialog
+    viewing?.let { e ->
+        AlertDialog(
+            onDismissRequest = { viewing = null },
+            confirmButton = {
+                TextButton(onClick = { viewing = null }) { Text("Close") }
+            },
+            title = { Text("Log details") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Date: ${formatDate(e.dateMillis)}")
+                    Text("Mood: ${e.mood} / 5")
+                    Text("Exercise: ${e.type}")
+                    Text("Duration: ${e.minutes} min")
+                }
+            }
+        )
+    }
+
+    // Delete confirm
+    deleting?.let { e ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    // remove and close
+                    val idx = initial.indexOfFirst { it.id == e.id }
+                    if (idx >= 0) initial.removeAt(idx)
+                    deleting = null
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            title = { Text("Delete log?") },
+            text = { Text("This will permanently remove ${formatDate(e.dateMillis)} (${e.type}, ${e.minutes} min).") }
+        )
+    }
+}
 
 @Composable
-fun HistoryScreen() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("History Screen", style = MaterialTheme.typography.headlineMedium)
+private fun HistoryRow(
+    entry: LogEntry,
+    onView: (LogEntry) -> Unit,
+    onEdit: (LogEntry) -> Unit,
+    onDelete: (LogEntry) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = formatDateOnly(entry.dateMillis),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                MoodBadge(entry.mood)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "${entry.type} • ${entry.minutes} min",
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onView(entry) }) { Text("View") }
+                TextButton(onClick = { onEdit(entry) }) { Text("Edit") }
+                TextButton(onClick = { onDelete(entry) }) { Text("Delete") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoodBadge(mood: Int) {
+    val label = when (mood) {
+        1 -> "Very sad"
+        2 -> "Sad"
+        3 -> "Normal"
+        4 -> "Happy"
+        else -> "Very happy"
+    }
+    val color = when (mood) {
+        1 -> Color(0xFFB71C1C)
+        2 -> Color(0xFFF57F17)
+        3 -> Color(0xFF616161)
+        4 -> Color(0xFF2E7D32)
+        else -> Color(0xFF1B5E20)
+    }
+    Text(
+        text = label,
+        color = Color.White,
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier
+            .background(color, shape = MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
+private fun SortMenu(
+    current: SortOption,
+    onChange: (SortOption) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier) {
+        Text("Sort", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(current.label)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            SortOption.values().forEach { opt ->
+                DropdownMenuItem(
+                    text = { Text(opt.label) },
+                    onClick = { onChange(opt); expanded = false }
+                )
+            }
+        }
+    }
+}
+
+// --- Helpers & sample data ---
+
+private fun formatDateOnly(ms: Long): String =
+    Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()))
+
+private fun sampleLogs(): List<LogEntry> {
+    val today = LocalDate.now()
+    val types = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
+    val moods = listOf(3, 4, 2, 5, 3, 4, 1, 5, 2, 3)
+    val mins = listOf(15, 30, 10, 45, 25, 35, 20, 50, 12, 40)
+
+    return (0 until 10).map { i ->
+        val date = today.minusDays(i.toLong()).atStartOfDay(ZoneId.systemDefault()).toInstant()
+        LogEntry(
+            id = i.toLong(),
+            dateMillis = date.toEpochMilli(),
+            mood = moods[i % moods.size],
+            type = types[i % types.size],
+            minutes = mins[i % mins.size]
+        )
     }
 }
