@@ -29,6 +29,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogScreen() {
@@ -51,6 +52,9 @@ fun LogScreen() {
 
     var selectedMood by rememberSaveable { mutableStateOf(moodOptions[2]) } // Normal
     var selectedIntensity by rememberSaveable { mutableStateOf(intensityOptions[1]) } // Medium
+
+
+
 
     // Format date helper
     val formatter = remember {

@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.LocalDate
@@ -44,15 +45,14 @@ data class LogEntry(
 )
 
 private enum class SortOption(val label: String) {
-    NEWEST("Newest first"),
-    OLDEST("Oldest first"),
-    DURATION("Longest duration")
+    NEWEST("Newest"),
+    OLDEST("Oldest"),
+    DURATION("Longest")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
-    // Optional hooks if you want to navigate to Log with prefill
     onEdit: (LogEntry) -> Unit = {},
     onView: (LogEntry) -> Unit = {}
 ) {
@@ -107,7 +107,7 @@ fun HistoryScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.Top,      // 垂直方向的布局策略
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.Start
     ) {
         Text("History", style = MaterialTheme.typography.headlineSmall)
@@ -124,7 +124,10 @@ fun HistoryScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Filters row: From / To date + Sort
+        // Ensure equal height for all three controls
+        val controlHeight = 48.dp
+
+        // Filters row: From / To date + Sort (same width + same height)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -134,8 +137,10 @@ fun HistoryScreen(
                 Text("From", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { fromOpen = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(formatDate(fromMillis)) }
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(controlHeight)
+                ) { Text(formatDate(fromMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
 
             // To date
@@ -143,15 +148,18 @@ fun HistoryScreen(
                 Text("To", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { toOpen = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(formatDate(toMillis)) }
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(controlHeight)
+                ) { Text(formatDate(toMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
 
             // Sort
             SortMenu(
                 current = sort,
                 onChange = { sort = it },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                height = controlHeight
             )
         }
 
@@ -225,7 +233,6 @@ fun HistoryScreen(
             onDismissRequest = { deleting = null },
             confirmButton = {
                 TextButton(onClick = {
-                    // remove and close
                     val idx = initial.indexOfFirst { it.id == e.id }
                     if (idx >= 0) initial.removeAt(idx)
                     deleting = null
@@ -307,14 +314,19 @@ private fun MoodBadge(mood: Int) {
 private fun SortMenu(
     current: SortOption,
     onChange: (SortOption) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    height: Dp = 48.dp
 ) {
     var expanded by remember { mutableStateOf(false) }
     Column(modifier) {
         Text("Sort", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text(current.label)
-        }
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(height)
+        ) { Text(current.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             SortOption.values().forEach { opt ->
                 DropdownMenuItem(

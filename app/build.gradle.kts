@@ -53,7 +53,11 @@ dependencies {
     implementation(libs.androidx.compose.runtime.saveable)
     implementation(libs.androidx.compose.foundation)
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
-
+    implementation("androidx.work:work-runtime-ktx:2.10.4")
+    implementation("androidx.compose.runtime:runtime-livedata:1.9.1")
+    implementation(libs.androidx.foundation)
+    implementation(libs.androidx.runtime.saveable)
+    implementation(libs.androidx.compose.ui.text)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -16,12 +16,13 @@ import com.example.application.ui.theme.ApplicationTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+
+        // Schedule background context collection (idempotent)
+        ContextIngestWorker.enqueue(this)
+
         setContent {
             ApplicationTheme {
-                // Choose ONE to preview; you can swap to test both:
-                RailAndBottomBarTogether()
-//                BottomNavigationBar()
+                BottomNavigationBar()
             }
         }
     }
