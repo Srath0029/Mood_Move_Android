@@ -19,7 +19,7 @@ import androidx.navigation.compose.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BottomNavigationBar() {
+fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -115,7 +115,8 @@ fun BottomNavigationBar() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Destination.HOME.route,   // change to LOGIN if you prefer to start there
+            startDestination = startRoute,   // change to LOGIN if you prefer to start there
+
             modifier = Modifier.padding(padding)
         ) {
             // Auth
@@ -125,7 +126,15 @@ fun BottomNavigationBar() {
                 )
             }
             composable(Destination.REGISTER.route) {
-                RegisterScreen(onGoLogin = { navController.popBackStack() })
+                RegisterScreen(
+                    onGoLogin = {
+                        navController.navigate(Destination.LOGIN.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
 
             // Settings – declare ONCE, with handlers

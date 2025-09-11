@@ -58,6 +58,9 @@ dependencies {
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.runtime.saveable)
     implementation(libs.androidx.compose.ui.text)
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.compose.material3:material3")
+    implementation(libs.androidx.material3)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -16,7 +16,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun LoginScreen(
     onLogin: (email: String, password: String) -> Unit = { _, _ -> },
-    onGoRegister: () -> Unit = {}
+    onGoRegister: () -> Unit = {},
+    onForgotPassword: () -> Unit = {}   // ← 新增：忘记密码回调（可导航到重置页）
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -85,6 +86,11 @@ fun LoginScreen(
             modifier = Modifier.fillMaxWidth()
         ) { Text("Sign in") }
 
+        // ← 新增：Forgot password
+        TextButton(onClick = onForgotPassword) {
+            Text("Forgot password?")
+        }
+
         Spacer(Modifier.height(8.dp))
 
         TextButton(onClick = onGoRegister, modifier = Modifier.align(Alignment.End)) {
@@ -92,5 +98,3 @@ fun LoginScreen(
         }
     }
 }
-
-

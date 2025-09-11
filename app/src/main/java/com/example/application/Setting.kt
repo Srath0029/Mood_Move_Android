@@ -1,6 +1,8 @@
 package com.example.application
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -11,11 +13,34 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.imePadding
 
+/* ---------- Simple TimePicker button using platform dialog ---------- */
+@Composable
+private fun TimePickerButton(
+    label: String,
+    enabled: Boolean,
+    hour: Int,
+    minute: Int,
+    onPicked: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    OutlinedButton(
+        onClick = {
+            android.app.TimePickerDialog(
+                context,
+                { _, h, m -> onPicked(h, m) },
+                hour, minute, /* is24Hour */ true
+            ).show()
+        },
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Text("$label: %02d:%02d".format(hour, minute))
+    }
+}
+
+/* ---------- Profile data ---------- */
 data class UserProfile(
     val name: String = "",
     val age: Int? = null,
@@ -40,34 +65,40 @@ private fun UserProfile.isEmpty(): Boolean =
     name.isBlank() && age == null && gender.isBlank() &&
             heightCm == null && weightKg == null && dobMillis == null
 
+/* ---------- Settings screen ---------- */
 @Composable
 fun SettingsScreen(
-    profile: UserProfile = UserProfile(),     // pass real data if you have it
+    profile: UserProfile = UserProfile(),
     onLogout: () -> Unit = {},
     onGoLogin: () -> Unit = {},
     onSavePrefs: (Boolean, Boolean) -> Unit = { _, _ -> }
 ) {
-    val shownProfile = remember(profile) { if (profile.isEmpty()) demoProfile() else profile }
-
+    // Profile formatting
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
-    fun formatDob(ms: Long?): String =
-        ms?.let {
-            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
-                .toLocalDate().format(dateFmt)
-        } ?: "Not set"
+    fun formatDob(ms: Long?) =
+        ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt) }
+            ?: "Not set"
 
-    // Preferences (original)
+    // Show demo profile if none provided
+    val shown = remember(profile) { if (profile.isEmpty()) demoProfile() else profile }
+
+    // Preferences + reminder times
+    val ctx = LocalContext.current
     var hydration by remember { mutableStateOf(true) }
     var medication by remember { mutableStateOf(false) }
-    var bgUpdates by remember { mutableStateOf(true) }
-    val context = LocalContext.current
+    var bgUpdates by remember { mutableStateOf(true) }           // ← NEW: WorkManager switch state
+
+    var hydrationHour by remember { mutableStateOf(9) }
+    var hydrationMinute by remember { mutableStateOf(0) }
+    var medicationHour by remember { mutableStateOf(20) }
+    var medicationMinute by remember { mutableStateOf(0) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()) // 使整页可滚动
-            .navigationBarsPadding()               // 避免被系统/底部栏遮挡（可选但推荐）
-            .imePadding()                          // 弹出键盘时自动上移（可选）
+            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .imePadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -75,56 +106,76 @@ fun SettingsScreen(
 
         // ---- Read-only Profile ----
         Text("Profile", style = MaterialTheme.typography.titleMedium)
-        ProfileRow("Full name", shownProfile.name.ifBlank { "—" })
-        ProfileRow("Age", shownProfile.age?.toString() ?: "—")
-        ProfileRow("Gender", shownProfile.gender.ifBlank { "—" })
-        ProfileRow("Height", shownProfile.heightCm?.let { "$it cm" } ?: "—")
-        ProfileRow("Weight", shownProfile.weightKg?.let { "$it kg" } ?: "—")
-        ProfileRow("Date of birth", formatDob(shownProfile.dobMillis))
+        ProfileRow("Full name", shown.name.ifBlank { "—" })
+        ProfileRow("Age", shown.age?.toString() ?: "—")
+        ProfileRow("Gender", shown.gender.ifBlank { "—" })
+        ProfileRow("Height", shown.heightCm?.let { "$it cm" } ?: "—")
+        ProfileRow("Weight", shown.weightKg?.let { "$it kg" } ?: "—")
+        ProfileRow("Date of birth", formatDob(shown.dobMillis))
 
         Divider()
 
-        // ---- Original settings (after profile) ----
+        // ---- Preferences ----
         Text("Preferences", style = MaterialTheme.typography.titleMedium)
-        SettingSwitchRow(
-            title = "Hydration reminders",
-            checked = hydration,
-            onCheckedChange = { hydration = it }
+
+        // Hydration (inexact alarm)
+        SettingSwitchRow("Hydration reminders", hydration) { hydration = it }
+        TimePickerButton(
+            label = "Hydration time",
+            enabled = hydration,
+            hour = hydrationHour,
+            minute = hydrationMinute,
+            onPicked = { h, m -> hydrationHour = h; hydrationMinute = m }
         )
-        SettingSwitchRow(
-            title = "Medication reminders",
-            checked = medication,
-            onCheckedChange = { medication = it }
+
+        // Medication (exact alarm)
+        SettingSwitchRow("Medication reminders (exact)", medication) { medication = it }
+        TimePickerButton(
+            label = "Medication time",
+            enabled = medication,
+            hour = medicationHour,
+            minute = medicationMinute,
+            onPicked = { h, m -> medicationHour = h; medicationMinute = m }
         )
+
+        // ← NEW: Background updates (WorkManager)
         SettingSwitchRow(
             title = "Background updates (WorkManager)",
             checked = bgUpdates,
             onCheckedChange = { checked ->
                 bgUpdates = checked
-                if (checked) ContextIngestWorker.enqueue(context)
-                else ContextIngestWorker.cancel(context)
+                if (checked) ContextIngestWorker.enqueue(ctx)
+                else ContextIngestWorker.cancel(ctx)
             }
         )
 
+        // Save preferences + schedule/cancel alarms
         Button(
-            onClick = { onSavePrefs(hydration, medication) },
+            onClick = {
+                onSavePrefs(hydration, medication)
+
+                if (hydration)
+                    ReminderScheduler.scheduleInexactDaily(ctx, hydrationHour, hydrationMinute)
+                else
+                    ReminderScheduler.cancel(ctx, ReminderType.HYDRATION)
+
+                if (medication)
+                    ReminderScheduler.scheduleExactDaily(ctx, medicationHour, medicationMinute)
+                else
+                    ReminderScheduler.cancel(ctx, ReminderType.MEDICATION)
+            },
             modifier = Modifier.fillMaxWidth()
         ) { Text("Save preferences") }
 
         Divider()
 
-        OutlinedButton(
-            onClick = onLogout,
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Log out") }
-
-        Button(
-            onClick = onGoLogin,
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Go to Login") }
+        OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("Log out") }
+        Button(onClick = onGoLogin, modifier = Modifier.fillMaxWidth()) { Text("Go to Login") }
     }
 }
 
+
+/* ---------- Small UI helpers ---------- */
 @Composable
 private fun ProfileRow(label: String, value: String) {
     Row(
