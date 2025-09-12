@@ -35,15 +35,16 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-// --- Data model for history ---
+/** Model of a single historical log item shown in the list. */
 data class LogEntry(
     val id: Long,
     val dateMillis: Long,
-    val mood: Int,       // 1..5 (Very sad .. Very happy)
-    val type: String,    // Walk / Run / Cycling / ...
-    val minutes: Int
+    val mood: Int,       // 1..5 scale (Very sad .. Very happy)
+    val type: String,    // Activity type (Walk / Run / Cycling / ...)
+    val minutes: Int     // Activity duration in minutes
 )
 
+/** Sorting options for the history list. */
 private enum class SortOption(val label: String) {
     NEWEST("Newest"),
     OLDEST("Oldest"),
@@ -56,13 +57,14 @@ fun HistoryScreen(
     onEdit: (LogEntry) -> Unit = {},
     onView: (LogEntry) -> Unit = {}
 ) {
-    // Demo list (replace with Room later)
+    // Demo list kept in memory (replace with Room in the future).
     val initial = remember { mutableStateListOf<LogEntry>().apply { addAll(sampleLogs()) } }
 
-    // Search + filters
+    // Search and filter state.
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(SortOption.NEWEST) }
 
+    // Date-range pickers (From / To).
     var fromOpen by remember { mutableStateOf(false) }
     var toOpen by remember { mutableStateOf(false) }
     var fromMillis by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -70,17 +72,18 @@ fun HistoryScreen(
     val fromState = rememberDatePickerState(initialSelectedDateMillis = fromMillis)
     val toState = rememberDatePickerState(initialSelectedDateMillis = toMillis)
 
-    // View & delete dialogs
+    // Dialog state for view and delete confirmations.
     var viewing by remember { mutableStateOf<LogEntry?>(null) }
     var deleting by remember { mutableStateOf<LogEntry?>(null) }
 
+    // Helper to format epoch millis to yyyy-MM-dd.
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDate(ms: Long?): String =
         ms?.let {
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
         } ?: "Any"
 
-    // Filtering + sorting
+    // Apply query filter, date-range filter, and sort order.
     val filteredSorted = remember(query, fromMillis, toMillis, sort, initial) {
         initial
             .asSequence()
@@ -103,6 +106,7 @@ fun HistoryScreen(
             .toList()
     }
 
+    // Screen header, search box, and filter toolbar.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -113,7 +117,7 @@ fun HistoryScreen(
         Text("History", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
 
-        // Search
+        // Free-text search by activity type or date string.
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -124,15 +128,15 @@ fun HistoryScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Ensure equal height for all three controls
+        // Keep all filter controls equal height for visual consistency.
         val controlHeight = 48.dp
 
-        // Filters row: From / To date + Sort (same width + same height)
+        // Filters row: From / To / Sort (each uses weight(1f) to be same width).
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // From date
+            // From date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("From", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
@@ -143,7 +147,7 @@ fun HistoryScreen(
                 ) { Text(formatDate(fromMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
 
-            // To date
+            // To date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("To", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
@@ -154,7 +158,7 @@ fun HistoryScreen(
                 ) { Text(formatDate(toMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
 
-            // Sort
+            // Sort dropdown button.
             SortMenu(
                 current = sort,
                 onChange = { sort = it },
@@ -165,7 +169,7 @@ fun HistoryScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // List
+        // Scrollable list of entries.
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -182,7 +186,7 @@ fun HistoryScreen(
         }
     }
 
-    // Date pickers
+    // From date dialog.
     if (fromOpen) {
         DatePickerDialog(
             onDismissRequest = { fromOpen = false },
@@ -195,6 +199,8 @@ fun HistoryScreen(
             dismissButton = { TextButton(onClick = { fromOpen = false }) { Text("Cancel") } }
         ) { DatePicker(state = fromState, showModeToggle = true) }
     }
+
+    // To date dialog.
     if (toOpen) {
         DatePickerDialog(
             onDismissRequest = { toOpen = false },
@@ -208,7 +214,7 @@ fun HistoryScreen(
         ) { DatePicker(state = toState, showModeToggle = true) }
     }
 
-    // View dialog
+    // View-details dialog for a selected entry.
     viewing?.let { e ->
         AlertDialog(
             onDismissRequest = { viewing = null },
@@ -227,7 +233,7 @@ fun HistoryScreen(
         )
     }
 
-    // Delete confirm
+    // Delete confirmation dialog for a selected entry.
     deleting?.let { e ->
         AlertDialog(
             onDismissRequest = { deleting = null },
@@ -245,6 +251,10 @@ fun HistoryScreen(
     }
 }
 
+/**
+ * Card row for a single log entry with date, mood badge, activity summary,
+ * and quick actions (View/Edit/Delete).
+ */
 @Composable
 private fun HistoryRow(
     entry: LogEntry,
@@ -284,6 +294,7 @@ private fun HistoryRow(
     }
 }
 
+/** Small colored label showing the mood category based on the 1..5 mood score. */
 @Composable
 private fun MoodBadge(mood: Int) {
     val label = when (mood) {
@@ -310,6 +321,7 @@ private fun MoodBadge(mood: Int) {
     )
 }
 
+/** Sort menu button + dropdown list of [SortOption] choices. */
 @Composable
 private fun SortMenu(
     current: SortOption,
@@ -340,10 +352,12 @@ private fun SortMenu(
 
 // --- Helpers & sample data ---
 
+/** Format an epoch millis value to a short yyyy-MM-dd string. */
 private fun formatDateOnly(ms: Long): String =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()))
 
+/** Generate simple demo logs for preview/testing the history UI. */
 private fun sampleLogs(): List<LogEntry> {
     val today = LocalDate.now()
     val types = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")

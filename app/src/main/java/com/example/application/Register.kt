@@ -17,6 +17,19 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.ZoneId
 
+/**
+ * RegisterScreen
+ *
+ * Sign-up form that collects basic credentials and optional profile fields.
+ * Features:
+ *  - Password + confirm with show/hide toggles
+ *  - Gender dropdown, numeric ranges for age/height/weight
+ *  - Date of Birth picker
+ *  - Early validation with inline messages and gated submit
+ *
+ * @param onRegister callback invoked when validation passes (returns all collected values)
+ * @param onGoLogin  navigate back to the Login screen
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(
@@ -26,22 +39,27 @@ fun RegisterScreen(
     ) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onGoLogin: () -> Unit = {}
 ) {
+    // ---------------- Required credential fields ----------------
     var name by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirm by rememberSaveable { mutableStateOf("") }
 
+    // Show/hide toggles for password fields
     var showPwd by rememberSaveable { mutableStateOf(false) }
     var showConfirm by rememberSaveable { mutableStateOf(false) }
 
+    // ---------------- Optional profile fields ----------------
     var ageText by rememberSaveable { mutableStateOf("") }
     var gender by rememberSaveable { mutableStateOf("Female") }
     var heightText by rememberSaveable { mutableStateOf("") }
     var weightText by rememberSaveable { mutableStateOf("") }
 
+    // Gender dropdown state
     val genderOptions = listOf("Female", "Male", "Other")
     var genderExpanded by remember { mutableStateOf(false) }
 
+    // Date of birth picker state
     var dobOpen by remember { mutableStateOf(false) }
     var dobMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     val dobState = rememberDatePickerState(initialSelectedDateMillis = dobMillis)
@@ -51,21 +69,24 @@ fun RegisterScreen(
             java.util.Locale.getDefault()
         )
     }
+    // Formats the DOB epoch millis for display
     fun fmt(ms: Long?) = ms?.let {
         Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
     } ?: "Not set"
 
-    // ---- 早期校验：规则 & 显示开关 ----
+    // ---------------- Early validation helpers ----------------
     var attemptedSubmit by rememberSaveable { mutableStateOf(false) }
+    // Decide when to show an error: after submit or once the field has any input
     fun shouldShow(showWhenTyped: Boolean, value: String) =
         attemptedSubmit || (showWhenTyped && value.isNotEmpty())
 
+    // Basic validators
     fun validEmail(s: String) =
         android.util.Patterns.EMAIL_ADDRESS.matcher(s).matches()
-
     fun validPassword(s: String) =
         s.length >= 8 && s.any(Char::isDigit)
 
+    // Parse optional numeric field and validate range
     fun parseIntOrNullInRange(txt: String, min: Int, max: Int): Pair<Int?, String?> {
         if (txt.isBlank()) return null to null
         val v = txt.toIntOrNull() ?: return null to "Numbers only"
@@ -73,20 +94,22 @@ fun RegisterScreen(
         return v to null
     }
 
-    // 逐项错误消息（为空表示无错误）
+    // Field error messages (null means no error)
     val nameError    = if (shouldShow(true, name) && name.isBlank()) "Name is required" else null
     val emailError   = if (email.isNotEmpty() && !validEmail(email)) "Invalid email address" else null
     val pwdError     = if (password.isNotEmpty() && !validPassword(password)) "Min 8 chars incl. a number" else null
     val confirmError = if (confirm.isNotEmpty() && confirm != password) "Passwords do not match" else null
 
-    val (ageVal, ageErr)         = parseIntOrNullInRange(ageText, 5, 120)
-    val (heightVal, heightErr)   = parseIntOrNullInRange(heightText, 80, 250)
-    val (weightVal, weightErr)   = parseIntOrNullInRange(weightText, 20, 250)
+    // Optional numeric validations
+    val (ageVal, ageErr)       = parseIntOrNullInRange(ageText, 5, 120)
+    val (heightVal, heightErr) = parseIntOrNullInRange(heightText, 80, 250)
+    val (weightVal, weightErr) = parseIntOrNullInRange(weightText, 20, 250)
 
+    // ---------------- Layout: vertical form ----------------
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()) // allows scrolling on small screens
             .navigationBarsPadding()
             .imePadding()
             .padding(16.dp),
@@ -94,6 +117,7 @@ fun RegisterScreen(
     ) {
         Text("Register", style = MaterialTheme.typography.headlineSmall)
 
+        // Full name (required)
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
@@ -104,6 +128,7 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        // Email (required)
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -116,6 +141,7 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        // Password (required) with show/hide toggle
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -141,6 +167,7 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        // Confirm password (required) with show/hide toggle
         OutlinedTextField(
             value = confirm,
             onValueChange = { confirm = it },
@@ -164,7 +191,9 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        // Age + Gender row (logically related fields grouped on one row)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Age (optional; numeric with range)
             OutlinedTextField(
                 value = ageText,
                 onValueChange = { ageText = it.filter(Char::isDigit) },
@@ -175,6 +204,7 @@ fun RegisterScreen(
                 modifier = Modifier.weight(1f)
             )
 
+            // Gender (dropdown) — controlled choice to reduce errors
             Column(Modifier.weight(2f)) {
                 ExposedDropdownMenuBox(
                     expanded = genderExpanded,
@@ -210,6 +240,7 @@ fun RegisterScreen(
             }
         }
 
+        // Height + Weight row (optional; numeric with range)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(
                 value = heightText,
@@ -231,6 +262,7 @@ fun RegisterScreen(
             )
         }
 
+        // Date of Birth actions
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { dobOpen = true }, modifier = Modifier.weight(1f)) {
                 Text("Date of birth: ${fmt(dobMillis)}")
@@ -240,6 +272,7 @@ fun RegisterScreen(
             }
         }
 
+        // Submit: validate required + optional ranges before invoking callback
         Button(
             onClick = {
                 attemptedSubmit = true
@@ -259,6 +292,7 @@ fun RegisterScreen(
             modifier = Modifier.fillMaxWidth()
         ) { Text("Create account") }
 
+        // Link back to Login
         TextButton(onClick = onGoLogin, modifier = Modifier.align(Alignment.End)) {
             Text("Already have an account? Sign in")
         }
@@ -266,6 +300,7 @@ fun RegisterScreen(
         Spacer(Modifier.height(8.dp))
     }
 
+    // Date of Birth: modal date picker
     if (dobOpen) {
         DatePickerDialog(
             onDismissRequest = { dobOpen = false },

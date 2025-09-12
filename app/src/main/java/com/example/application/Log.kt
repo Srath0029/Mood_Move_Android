@@ -33,63 +33,77 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-
-
-
+/**
+ * LogScreen
+ *
+ * Daily logging form that captures:
+ *  - Date (DatePicker)
+ *  - Exercise type (dropdown)
+ *  - Duration (dropdown)
+ *  - Mood (radio group)
+ *  - Intensity (radio group)
+ *
+ * Includes early validation with inline error messages and a snackbar on success.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogScreen() {
-    // ---- 成功反馈用的 Snackbar ----
+    // Snackbar host for lightweight success feedback.
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // ---- 字段 & 校验状态 ----
+    // Global flag to show validation errors (set after the first submit attempt).
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
-    // 为了能触发“必选校验”，把初始值设为“未选择”
+    // Date state: initialize as "not selected" so required validation can trigger.
     var selectedDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     val dateState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
     var openDatePicker by remember { mutableStateOf(false) }
 
+    // Exercise type dropdown state.
     val exerciseTypes = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
     var typeExpanded by remember { mutableStateOf(false) }
     var selectedType by rememberSaveable { mutableStateOf("") }
 
+    // Duration dropdown state.
     val durations = listOf("10 min", "20 min", "30 min", "45 min", "60 min")
     var durationExpanded by remember { mutableStateOf(false) }
     var selectedDuration by rememberSaveable { mutableStateOf("") }
 
+    // Mood radio group state.
     val moodOptions = listOf("Very happy", "Happy", "Normal", "Sad", "Very sad")
     var selectedMood by rememberSaveable { mutableStateOf<String?>(null) }
 
+    // Intensity radio group state.
     val intensityOptions = listOf("High", "Medium", "Low")
     var selectedIntensity by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // ---- 日期格式化 ----
+    // Date formatter used to render the selected day in the text field.
     val formatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDate(millis: Long?): String =
         millis?.let { ms ->
             Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate().format(formatter)
         } ?: "Select date"
 
-    // ---- 错误状态（内联提示专用）----
+    // Field-level error flags for inline validation messages.
     val dateError = showErrors && selectedDateMillis == null
     val typeError = showErrors && selectedType.isBlank()
     val durationError = showErrors && selectedDuration.isBlank()
     val moodError = showErrors && selectedMood == null
     val intensityError = showErrors && selectedIntensity == null
 
-    // ---- 保存提交 ----
+    // Submit handler: toggles validation and shows snackbar if all required fields are set.
     fun submit() {
         showErrors = true
-        val hasError = selectedDateMillis == null ||
-                selectedType.isBlank() ||
-                selectedDuration.isBlank() ||
-                selectedMood == null ||
-                selectedIntensity == null
+        val hasError =
+            selectedDateMillis == null ||
+                    selectedType.isBlank() ||
+                    selectedDuration.isBlank() ||
+                    selectedMood == null ||
+                    selectedIntensity == null
 
         if (!hasError) {
-            // TODO: Save to Room; trigger insights/notifications later.
+            // TODO: persist to Room; potentially trigger insights/notifications afterwards.
             scope.launch { snackbarHostState.showSnackbar("Log saved") }
         }
     }
@@ -100,14 +114,14 @@ fun LogScreen() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(rememberScrollState()) // Allow scroll on smaller screens/with keyboard.
                 .padding(innerPadding)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("Daily Log", style = MaterialTheme.typography.headlineSmall)
 
-            /* ---- Date ---- */
+            /* ---------------- Date ---------------- */
             OutlinedTextField(
                 value = formatDate(selectedDateMillis),
                 onValueChange = {},
@@ -118,7 +132,11 @@ fun LogScreen() {
                 isError = dateError
             )
             if (dateError) {
-                Text("Please select a date", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Please select a date",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             Button(onClick = { openDatePicker = true }) { Text("Pick a date") }
 
@@ -129,15 +147,19 @@ fun LogScreen() {
                         Button(onClick = {
                             selectedDateMillis = dateState.selectedDateMillis
                             openDatePicker = false
-                            // 纠正后立即隐藏该字段错误
-                            if (selectedDateMillis != null) showErrors = showErrors // 触发重组即可
+                            // Force recomposition; error state will disappear once the value is set.
+                            if (selectedDateMillis != null) showErrors = showErrors
                         }) { Text("OK") }
                     },
-                    dismissButton = { Button(onClick = { openDatePicker = false }) { Text("Cancel") } }
-                ) { DatePicker(state = dateState, showModeToggle = true) }
+                    dismissButton = {
+                        Button(onClick = { openDatePicker = false }) { Text("Cancel") }
+                    }
+                ) {
+                    DatePicker(state = dateState, showModeToggle = true)
+                }
             }
 
-            /* ---- Exercise Type ---- */
+            /* ---------------- Exercise Type ---------------- */
             ExposedDropdownMenuBox(
                 expanded = typeExpanded,
                 onExpandedChange = { typeExpanded = !typeExpanded }
@@ -148,24 +170,36 @@ fun LogScreen() {
                     value = selectedType,
                     onValueChange = {},
                     label = { Text("Exercise type") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeExpanded) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeExpanded)
+                    },
                     isError = typeError,
                     placeholder = { Text("Please choose") }
                 )
-                DropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
+                DropdownMenu(
+                    expanded = typeExpanded,
+                    onDismissRequest = { typeExpanded = false }
+                ) {
                     exerciseTypes.forEach { option ->
                         DropdownMenuItem(
                             text = { Text(option) },
-                            onClick = { selectedType = option; typeExpanded = false }
+                            onClick = {
+                                selectedType = option
+                                typeExpanded = false
+                            }
                         )
                     }
                 }
             }
             if (typeError) {
-                Text("Please choose an exercise type", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Please choose an exercise type",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
 
-            /* ---- Duration ---- */
+            /* ---------------- Duration ---------------- */
             ExposedDropdownMenuBox(
                 expanded = durationExpanded,
                 onExpandedChange = { durationExpanded = !durationExpanded }
@@ -176,24 +210,36 @@ fun LogScreen() {
                     value = selectedDuration,
                     onValueChange = {},
                     label = { Text("Duration") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = durationExpanded) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = durationExpanded)
+                    },
                     isError = durationError,
                     placeholder = { Text("Please choose") }
                 )
-                DropdownMenu(expanded = durationExpanded, onDismissRequest = { durationExpanded = false }) {
+                DropdownMenu(
+                    expanded = durationExpanded,
+                    onDismissRequest = { durationExpanded = false }
+                ) {
                     durations.forEach { option ->
                         DropdownMenuItem(
                             text = { Text(option) },
-                            onClick = { selectedDuration = option; durationExpanded = false }
+                            onClick = {
+                                selectedDuration = option
+                                durationExpanded = false
+                            }
                         )
                     }
                 }
             }
             if (durationError) {
-                Text("Please choose a duration", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Please choose a duration",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
 
-            /* ---- Mood ---- */
+            /* ---------------- Mood ---------------- */
             Text("Mood", style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 moodOptions.forEach { mood ->
@@ -208,10 +254,14 @@ fun LogScreen() {
                 }
             }
             if (moodError) {
-                Text("Please select your mood", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Please select your mood",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
 
-            /* ---- Intensity ---- */
+            /* ---------------- Intensity ---------------- */
             Text("Exercise intensity", style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 intensityOptions.forEach { level ->
@@ -226,10 +276,14 @@ fun LogScreen() {
                 }
             }
             if (intensityError) {
-                Text("Please select intensity", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Please select intensity",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
 
-            /* ---- Submit ---- */
+            /* ---------------- Submit ---------------- */
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { submit() },

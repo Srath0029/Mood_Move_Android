@@ -15,6 +15,17 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /* ---------- Simple TimePicker button using platform dialog ---------- */
+/**
+ * Small helper that shows the platform TimePicker dialog and writes the result
+ * back via [onPicked]. Used for hydration/medication reminder times.
+ *
+ * @param label    text shown on the button
+ * @param enabled  whether the button is clickable/active
+ * @param hour     current hour (24h)
+ * @param minute   current minute
+ * @param onPicked callback with (hour, minute) when a time is chosen
+ * @param modifier layout modifier for the button
+ */
 @Composable
 private fun TimePickerButton(
     label: String,
@@ -27,6 +38,7 @@ private fun TimePickerButton(
     val context = LocalContext.current
     OutlinedButton(
         onClick = {
+            // Use platform dialog to avoid Material3 dependency/version issues.
             android.app.TimePickerDialog(
                 context,
                 { _, h, m -> onPicked(h, m) },
@@ -41,6 +53,9 @@ private fun TimePickerButton(
 }
 
 /* ---------- Profile data ---------- */
+/**
+ * Simple read-only profile model displayed at the top of Settings.
+ */
 data class UserProfile(
     val name: String = "",
     val age: Int? = null,
@@ -50,6 +65,9 @@ data class UserProfile(
     val dobMillis: Long? = null
 )
 
+/**
+ * Demo profile used when no profile is provided.
+ */
 private fun demoProfile(): UserProfile =
     UserProfile(
         name = "Yifan Wang",
@@ -61,11 +79,25 @@ private fun demoProfile(): UserProfile =
             .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     )
 
+/**
+ * Returns true if all fields are effectively empty/absent.
+ */
 private fun UserProfile.isEmpty(): Boolean =
     name.isBlank() && age == null && gender.isBlank() &&
             heightCm == null && weightKg == null && dobMillis == null
 
 /* ---------- Settings screen ---------- */
+/**
+ * Settings screen that shows:
+ *  - Read-only Profile summary (name/age/gender/height/weight/DOB)
+ *  - Preferences: hydration + medication reminders (with time pickers)
+ *  - Background updates toggle (WorkManager)
+ *  - Save preferences (schedules/cancels alarms)
+ *  - Logout / Go to Login actions
+ *
+ * Note: Alarm scheduling is delegated to [ReminderScheduler];
+ *       WorkManager start/stop uses [ContextIngestWorker].
+ */
 @Composable
 fun SettingsScreen(
     profile: UserProfile = UserProfile(),
@@ -73,20 +105,20 @@ fun SettingsScreen(
     onGoLogin: () -> Unit = {},
     onSavePrefs: (Boolean, Boolean) -> Unit = { _, _ -> }
 ) {
-    // Profile formatting
+    // Date formatting for DOB row
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDob(ms: Long?) =
         ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt) }
             ?: "Not set"
 
-    // Show demo profile if none provided
+    // Use demo profile if nothing was provided
     val shown = remember(profile) { if (profile.isEmpty()) demoProfile() else profile }
 
-    // Preferences + reminder times
+    // Preferences and reminder times (local screen state)
     val ctx = LocalContext.current
     var hydration by remember { mutableStateOf(true) }
     var medication by remember { mutableStateOf(false) }
-    var bgUpdates by remember { mutableStateOf(true) }           // ← NEW: WorkManager switch state
+    var bgUpdates by remember { mutableStateOf(true) }           // WorkManager on/off
 
     var hydrationHour by remember { mutableStateOf(9) }
     var hydrationMinute by remember { mutableStateOf(0) }
@@ -96,7 +128,7 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()) // Allow scrolling on smaller screens
             .navigationBarsPadding()
             .imePadding()
             .padding(16.dp),
@@ -115,10 +147,10 @@ fun SettingsScreen(
 
         Divider()
 
-        // ---- Preferences ----
+        // ---- Preferences (reminders + background updates) ----
         Text("Preferences", style = MaterialTheme.typography.titleMedium)
 
-        // Hydration (inexact alarm)
+        // Hydration reminder (inexact alarm)
         SettingSwitchRow("Hydration reminders", hydration) { hydration = it }
         TimePickerButton(
             label = "Hydration time",
@@ -128,7 +160,7 @@ fun SettingsScreen(
             onPicked = { h, m -> hydrationHour = h; hydrationMinute = m }
         )
 
-        // Medication (exact alarm)
+        // Medication reminder (exact alarm)
         SettingSwitchRow("Medication reminders (exact)", medication) { medication = it }
         TimePickerButton(
             label = "Medication time",
@@ -138,7 +170,7 @@ fun SettingsScreen(
             onPicked = { h, m -> medicationHour = h; medicationMinute = m }
         )
 
-        // ← NEW: Background updates (WorkManager)
+        // Background updates: start/stop WorkManager immediately on toggle
         SettingSwitchRow(
             title = "Background updates (WorkManager)",
             checked = bgUpdates,
@@ -149,7 +181,7 @@ fun SettingsScreen(
             }
         )
 
-        // Save preferences + schedule/cancel alarms
+        // Persist preferences and (re)schedule/cancel alarms accordingly
         Button(
             onClick = {
                 onSavePrefs(hydration, medication)
@@ -169,13 +201,16 @@ fun SettingsScreen(
 
         Divider()
 
+        // Account actions
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("Log out") }
         Button(onClick = onGoLogin, modifier = Modifier.fillMaxWidth()) { Text("Go to Login") }
     }
 }
 
-
 /* ---------- Small UI helpers ---------- */
+/**
+ * Two-column row used to render a single profile attribute/value.
+ */
 @Composable
 private fun ProfileRow(label: String, value: String) {
     Row(
@@ -187,6 +222,9 @@ private fun ProfileRow(label: String, value: String) {
     }
 }
 
+/**
+ * Labeled switch row used for preference items in Settings.
+ */
 @Composable
 private fun SettingSwitchRow(
     title: String,

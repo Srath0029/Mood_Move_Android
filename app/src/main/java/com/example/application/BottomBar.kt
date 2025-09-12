@@ -17,20 +17,32 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 
+/**
+ * BottomNavigationBar
+ *
+ * A single-activity scaffold that:
+ * - Hosts a Navigation Bar (bottom) for the four main tabs.
+ * - Shows a TopAppBar with a dynamic title and a Settings action.
+ * - Wires the NavHost with all routes (auth + main + settings + forgot).
+ * - Observes WorkManager to display a one-line snackbar when background work succeeds.
+ *
+ * @param startRoute initial route for the NavHost (defaults to Home).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
+    // NavController and current route
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    // Brand colors
+    // Brand colors used across TopAppBar and NavigationBar
     val BrandPurple = Color(0xFFB39DDB)
     val BrandOnPurple = Color.White
     val BrandOnPurpleFaded = Color.White.copy(alpha = 0.80f)
     val BrandIndicator = Color.White.copy(alpha = 0.20f)
 
-    // Bottom items (no Settings here)
+    // Bottom tabs to show (Settings is accessed from the top-right action)
     val bottomItems = listOf(
         Destination.HOME,
         Destination.LOG,
@@ -38,7 +50,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         Destination.INSIGHTS
     )
 
-    // --- WorkManager snackbar ---
+    // --- WorkManager snackbar: show "Data refreshed" when a periodic worker completes ---
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val workInfos by remember {
@@ -53,9 +65,9 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             snackbarHostState.showSnackbar("Data refreshed")
         }
     }
-    // ----------------------------
+    // -------------------------------------------------------------------------------
 
-    // Helper to navigate without duplicating destinations
+    // Helper: navigate to a route without duplicating destinations on the back stack
     fun navigateSingleTopTo(route: String) {
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -64,7 +76,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         }
     }
 
-    // Dynamic title
+    // App bar title changes based on the current route
     val title = when (currentRoute) {
         Destination.HOME.route     -> "Home"
         Destination.LOG.route      -> "Log"
@@ -76,11 +88,13 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         else                       -> "Navigation Bar Demo App"
     }
 
+    // Main scaffold: top app bar, bottom nav bar, snackbar host, and the NavHost content
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title, style = MaterialTheme.typography.titleMedium) },
                 actions = {
+                    // Open Settings from the app bar action
                     IconButton(onClick = { navigateSingleTopTo(Destination.SETTINGS.route) }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -92,7 +106,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             )
         },
         bottomBar = {
-            // ALWAYS show bottom bar (even on Login/Register)
+            // Always show the bottom bar (including on auth screens for this prototype)
             NavigationBar(containerColor = BrandPurple) {
                 bottomItems.forEach { dest ->
                     NavigationBarItem(
@@ -113,19 +127,22 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
+        // NavHost: defines all routes in the app
         NavHost(
             navController = navController,
-            startDestination = startRoute,   // change to LOGIN if you prefer to start there
-
+            startDestination = startRoute,   // change to LOGIN to start on the login screen
             modifier = Modifier.padding(padding)
         ) {
-            // Auth
+            // --- Auth routes ---
             composable(Destination.LOGIN.route) {
+                // Login screen: links to Register and Forgot Password
                 LoginScreen(
-                    onGoRegister = { navigateSingleTopTo(Destination.REGISTER.route) }
+                    onGoRegister = { navigateSingleTopTo(Destination.REGISTER.route) },
+                    onForgotPassword = { navigateSingleTopTo(Destination.FORGOT.route) }
                 )
             }
             composable(Destination.REGISTER.route) {
+                // Register screen: go back to Login explicitly (not just pop)
                 RegisterScreen(
                     onGoLogin = {
                         navController.navigate(Destination.LOGIN.route) {
@@ -136,26 +153,35 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                     }
                 )
             }
+            composable(Destination.FORGOT.route) {
+                // Forgot Password: after submit or link, navigate back to Login
+                ForgotPasswordScreen(
+                    onSubmit = { email, code, newPwd ->
+                        navigateSingleTopTo(Destination.LOGIN.route)
+                    },
+                    onBackToLogin = { navigateSingleTopTo(Destination.LOGIN.route) }
+                )
+            }
 
-            // Settings – declare ONCE, with handlers
+            // --- Settings route (declared once, with handlers) ---
             composable(Destination.SETTINGS.route) {
                 SettingsScreen(
                     onLogout = {
-                        // Go to Login and clear back stack so Back won’t return to Home
+                        // Clear the back stack so Back won't return to protected screens
                         navController.navigate(Destination.LOGIN.route) {
                             popUpTo(navController.graph.findStartDestination().id) { inclusive = true }
                             launchSingleTop = true
                         }
                     },
                     onGoLogin = {
-                        // Simple navigate to Login (keeps back stack)
+                        // Simple navigation back to Login (keep state)
                         navigateSingleTopTo(Destination.LOGIN.route)
                     },
-                    onSavePrefs = { _, _ -> /* optional: persist to DataStore/Room */ }
+                    onSavePrefs = { _, _ -> /* optional persistence (DataStore/Room) */ }
                 )
             }
 
-            // Main tabs
+            // --- Main tabs ---
             composable(Destination.HOME.route)     { HomeScreen() }
             composable(Destination.LOG.route)      { LogScreen() }
             composable(Destination.HISTORY.route)  { HistoryScreen() }
