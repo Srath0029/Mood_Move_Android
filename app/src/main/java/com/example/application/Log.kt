@@ -43,6 +43,15 @@ import java.util.Locale
  *  - Mood (radio group)
  *  - Intensity (radio group)
  *
+ *  Database
+ *   - email
+ *   - Date
+ *   - Exercise type
+ *   - Duration
+ *   - Mood （very happy 5）
+ *   - Intensity
+ *   - Location
+ *   - Temp
  * Includes early validation with inline error messages and a snackbar on success.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -294,3 +303,5 @@ fun LogScreen() {
         }
     }
 }
+
+
