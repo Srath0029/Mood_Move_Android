@@ -1,5 +1,7 @@
 package com.example.application
 
+import android.util.Log
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -32,7 +34,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SelectableDates
 /**
  * LogScreen
  *
@@ -66,8 +74,15 @@ fun LogScreen() {
 
     // Date state: initialize as "not selected" so required validation can trigger.
     var selectedDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
-    val dateState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
     var openDatePicker by remember { mutableStateOf(false) }
+    val dateState = rememberDatePickerState(
+        initialSelectedDateMillis = selectedDateMillis,
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                return utcTimeMillis <= System.currentTimeMillis()
+            }
+        }
+    )
 
     // Exercise type dropdown state.
     val exerciseTypes = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
@@ -131,15 +146,38 @@ fun LogScreen() {
             Text("Daily Log", style = MaterialTheme.typography.headlineSmall)
 
             /* ---------------- Date ---------------- */
-            OutlinedTextField(
-                value = formatDate(selectedDateMillis),
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Date") },
-                modifier = Modifier.fillMaxWidth(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = openDatePicker) },
-                isError = dateError
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        Log.d("Solution", "Box wrapper clicked, opening date picker...")
+                        openDatePicker = true
+                    }
+            ) {
+                OutlinedTextField(
+                    value = formatDate(selectedDateMillis),
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = false,
+                    label = { Text("Date") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.DateRange,
+                            contentDescription = "Select Date"
+                        )
+                    },
+                    isError = dateError,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledBorderColor = if (dateError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                        disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                )
+            }
+
             if (dateError) {
                 Text(
                     "Please select a date",
@@ -147,7 +185,6 @@ fun LogScreen() {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Button(onClick = { openDatePicker = true }) { Text("Pick a date") }
 
             if (openDatePicker) {
                 DatePickerDialog(
@@ -156,15 +193,15 @@ fun LogScreen() {
                         Button(onClick = {
                             selectedDateMillis = dateState.selectedDateMillis
                             openDatePicker = false
-                            // Force recomposition; error state will disappear once the value is set.
-                            if (selectedDateMillis != null) showErrors = showErrors
                         }) { Text("OK") }
                     },
                     dismissButton = {
                         Button(onClick = { openDatePicker = false }) { Text("Cancel") }
                     }
                 ) {
-                    DatePicker(state = dateState, showModeToggle = true)
+                    DatePicker(state = dateState,
+                        showModeToggle = true
+                        )
                 }
             }
 
