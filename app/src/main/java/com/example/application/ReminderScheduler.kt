@@ -5,11 +5,19 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import java.util.Calendar
 
-enum class ReminderType(val requestCode: Int) { HYDRATION(1000), MEDICATION(1001) }
+enum class ReminderType(val requestCode: Int) {
+    HYDRATION_EXACT(1000),       // one-shot exact (next occurrence)
+    MEDICATION_EXACT(1001),      // one-shot exact (next occurrence)
+    MEDICATION_REPEAT(1002),     // daily inexact repeating (medication)
+    HYDRATION_REPEAT(1003)       // daily inexact repeating (hydration)
+}
 
 object ReminderScheduler {
+
+    private const val TAG = "ReminderScheduler"
 
     private fun pending(context: Context, type: ReminderType): PendingIntent {
         val i = Intent(context, ReminderReceiver::class.java).putExtra("type", type.name)
@@ -32,33 +40,90 @@ object ReminderScheduler {
         return cal.timeInMillis
     }
 
-    /** Inexact daily (battery-friendly), e.g. hydration */
+    /** HYDRATION */
     fun scheduleInexactDaily(context: Context, hour24: Int, minute: Int) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val at = nextTriggerAt(hour24, minute)
+
+
+        var exactOk = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            exactOk = false
+            Log.w(TAG, "Hydration exact not allowed; falling back to inexact only.")
+        } else {
+            try {
+                val piExact = pending(context, ReminderType.HYDRATION_EXACT)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, piExact)
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, at, piExact)
+                }
+                Log.d(TAG, "Hydration EXACT scheduled at=$at")
+            } catch (se: SecurityException) {
+                exactOk = false
+                Log.e(TAG, "Hydration exact denied: ${se.localizedMessage}")
+            }
+        }
+
+        // Always schedule the daily inexact repeat for subsequent days (separate PI!)
+        val piRepeat = pending(context, ReminderType.HYDRATION_REPEAT)
         am.setInexactRepeating(
-            AlarmManager.RTC_WAKEUP, at, AlarmManager.INTERVAL_DAY, pending(context, ReminderType.HYDRATION)
+            AlarmManager.RTC_WAKEUP,
+            at + AlarmManager.INTERVAL_DAY,   // first repeat = tomorrow
+            AlarmManager.INTERVAL_DAY,
+            piRepeat
         )
+        Log.d(TAG, "Hydration REPEAT first at=${at + AlarmManager.INTERVAL_DAY} (inexact)")
     }
 
-    /** Exact daily (time-sensitive), e.g. medication */
-    fun scheduleExactDaily(context: Context, hour24: Int, minute: Int) {
+    /** MEDICATION */
+    fun scheduleExactDaily(context: Context, hour24: Int, minute: Int): Boolean {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val at = nextTriggerAt(hour24, minute)
-        val pi = pending(context, ReminderType.MEDICATION)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+        var exactOk = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            Log.w(TAG, "Medication exact not allowed.")
+            exactOk = false
         } else {
-            am.setExact(AlarmManager.RTC_WAKEUP, at, pi)
+            try {
+                val piExact = pending(context, ReminderType.MEDICATION_EXACT)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, piExact)
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, at, piExact)
+                }
+                Log.d(TAG, "Medication EXACT scheduled at=$at")
+            } catch (se: SecurityException) {
+                Log.e(TAG, "Medication exact denied: ${se.localizedMessage}")
+                exactOk = false
+            }
         }
-        // Optionally also set a repeating one for subsequent days:
-        am.setInexactRepeating(AlarmManager.RTC_WAKEUP, at + AlarmManager.INTERVAL_DAY,
-            AlarmManager.INTERVAL_DAY, pi)
+
+        val piRepeat = pending(context, ReminderType.MEDICATION_REPEAT)
+        am.setInexactRepeating(
+            AlarmManager.RTC_WAKEUP,
+            at + AlarmManager.INTERVAL_DAY,
+            AlarmManager.INTERVAL_DAY,
+            piRepeat
+        )
+        Log.d(TAG, "Medication REPEAT first at=${at + AlarmManager.INTERVAL_DAY} (inexact)")
+
+        return exactOk
     }
 
     fun cancel(context: Context, type: ReminderType) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        am.cancel(pending(context, type))
+        when (type) {
+            ReminderType.HYDRATION_EXACT, ReminderType.HYDRATION_REPEAT -> {
+                am.cancel(pending(context, ReminderType.HYDRATION_EXACT))
+                am.cancel(pending(context, ReminderType.HYDRATION_REPEAT))
+            }
+            ReminderType.MEDICATION_EXACT, ReminderType.MEDICATION_REPEAT -> {
+                am.cancel(pending(context, ReminderType.MEDICATION_EXACT))
+                am.cancel(pending(context, ReminderType.MEDICATION_REPEAT))
+            }
+        }
+        Log.d(TAG, "Cancelled for $type")
     }
 }
