@@ -18,9 +18,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
+import java.time.Period
 import java.time.ZoneId
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,6 +86,18 @@ fun RegisterScreen(
     val (ageVal, ageErr)       = parseIntOrNullInRange(ageText, 5, 120)
     val (heightVal, heightErr) = parseIntOrNullInRange(heightText, 80, 250)
     val (weightVal, weightErr) = parseIntOrNullInRange(weightText, 20, 250)
+
+    // ---- Age–DOB soft warning ----
+    val calculatedAge: Int? = remember(dobMillis) {
+        dobMillis?.let {
+            val dob = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+            val today = LocalDate.now(ZoneId.systemDefault())
+            Period.between(dob, today).years
+        }
+    }
+    val showAgeDobWarning = (ageText.isNotBlank() || attemptedSubmit) &&
+            ageVal != null && calculatedAge != null && ageVal != calculatedAge
+    val WarningColor = Color(0xFFFFA000) // amber
 
     // ---------------- State: loading / errors / snackbar ----------------
     val scope = rememberCoroutineScope()
@@ -204,8 +219,17 @@ fun RegisterScreen(
                     onValueChange = { ageText = it.filter(Char::isDigit) },
                     label = { Text("Age") },
                     singleLine = true,
-                    isError = ageErr != null,
-                    supportingText = { if (ageErr != null) Text(ageErr) },
+                    isError = ageErr != null, // keep "error" for range/format only
+                    supportingText = {
+                        when {
+                            ageErr != null -> Text(ageErr)
+                            showAgeDobWarning -> Text(
+                                "Age does not match DOB (should be $calculatedAge)",
+                                color = WarningColor
+                            )
+                            else -> {}
+                        }
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 Column(Modifier.weight(2f)) {
@@ -301,12 +325,16 @@ fun RegisterScreen(
                             loading = false
                             result.onSuccess {
                                 clearAllFields()
-                                // show GREEN snackbar, then navigate after a short delay
                                 snack.showSnackbar("Successful Registration")
                                 delay(1200)
                                 onRegistered()
                             }.onFailure { e ->
-                                errorMsg = e.localizedMessage ?: "Registration failed"
+                                errorMsg = when (e) {
+                                    is FirebaseAuthUserCollisionException ->
+                                        "This email is already registered. Try signing in or reset your password."
+                                    else ->
+                                        e.localizedMessage ?: "Registration failed"
+                                }
                             }
                         }
                     }

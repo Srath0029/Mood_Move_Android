@@ -20,18 +20,15 @@ import androidx.navigation.compose.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
-    // NavController and current route
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    // Brand colors
     val BrandPurple = Color(0xFFB39DDB)
     val BrandOnPurple = Color.White
     val BrandOnPurpleFaded = Color.White.copy(alpha = 0.80f)
     val BrandIndicator = Color.White.copy(alpha = 0.20f)
 
-    // Bottom tabs
     val bottomItems = listOf(
         Destination.HOME,
         Destination.LOG,
@@ -39,7 +36,6 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         Destination.INSIGHTS
     )
 
-    // --- WorkManager snackbar: "Data refreshed" ---
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val workInfos by remember {
@@ -54,7 +50,6 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             snackbarHostState.showSnackbar("Data refreshed")
         }
     }
-    // ------------------------------------------------
 
     fun navigateSingleTopTo(route: String) {
         navController.navigate(route) {
@@ -122,7 +117,6 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                     onGoRegister = { navigateSingleTopTo(Destination.REGISTER.route) },
                     onForgotPassword = { navigateSingleTopTo(Destination.FORGOT.route) },
                     onLoggedIn = {
-                        // Go to Settings after successful sign-in and remove Login from back stack
                         navController.navigate(Destination.SETTINGS.route) {
                             popUpTo(Destination.LOGIN.route) { inclusive = true }
                             launchSingleTop = true
@@ -139,14 +133,20 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                             launchSingleTop = true
                             restoreState = true
                         }
+                    },
+                    // ✅ NEW: go to Login immediately after successful registration
+                    onRegistered = {
+                        navController.navigate(Destination.LOGIN.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
             composable(Destination.FORGOT.route) {
                 ForgotPasswordScreen(
-                    onSubmit = { _, _, _ ->
-                        navigateSingleTopTo(Destination.LOGIN.route)
-                    },
+                    onSubmit = { _, _, _ -> navigateSingleTopTo(Destination.LOGIN.route) },
                     onBackToLogin = { navigateSingleTopTo(Destination.LOGIN.route) }
                 )
             }
