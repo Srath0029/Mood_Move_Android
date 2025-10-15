@@ -97,10 +97,6 @@ fun RegisterScreen(
         attemptedSubmit = false; showPwd = false; showConfirm = false
     }
 
-
-
-
-
     Scaffold(
         snackbarHost = {
             SnackbarHost(snack) { data ->
