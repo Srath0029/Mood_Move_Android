@@ -197,6 +197,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             // --- Main tabs ---
             composable(Destination.HOME.route) {
                 HomeScreen(
+                    isLoggedIn = isLoggedIn,
                     onQuickLog   = { navigateGuarded(Destination.LOG.route) },
                     onGoHistory  = { navigateGuarded(Destination.HISTORY.route) },
                     onGoInsights = { navigateGuarded(Destination.INSIGHTS.route) },

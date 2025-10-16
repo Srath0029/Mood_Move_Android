@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 object AuthRepository {
+
+    /** Conveniently get the current uid (return null if not logged in) */
+
+    fun currentUserId(): String? = Firebase.auth.currentUser?.uid
     private val auth = Firebase.auth
     private val db = Firebase.firestore
     // New: Login status

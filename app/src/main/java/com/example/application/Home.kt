@@ -20,45 +20,54 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toArgb
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.max
 import kotlin.math.roundToInt
+import androidx.compose.runtime.produceState
 
-/**
- * HomeScreen
- *
- * Landing page that summarizes the current week and offers quick navigation:
- * - Quick action cards: Log, History, Insights, Settings.
- * - "This Week at a Glance": three key stats + a small mood sparkline.
- * - A context-aware tip derived from recent mood/exercise/temp.
- *
- * @param onQuickLog   navigate to the Log screen quickly
- * @param onGoHistory  navigate to the History screen
- * @param onGoInsights navigate to the Insights screen
- * @param onGoSettings navigate to the Settings screen
- */
+
 @Composable
 fun HomeScreen(
+    isLoggedIn: Boolean,
     onQuickLog: () -> Unit = {},
     onGoHistory: () -> Unit = {},
     onGoInsights: () -> Unit = {},
     onGoSettings: () -> Unit = {}
 ) {
-    // Demo weekly data (replace with Room/Retrofit later).
-    val week = remember { generateHomeWeek() }
+    val repo = remember { HomeRepositoryFirebase() }
 
-    // Aggregate metrics for the header stats.
-    val avgMood = week.map { it.mood }.average()
-    val totalMin = week.sumOf { it.minutes }
-    val avgTemp = week.map { it.tempC }.average()
+    // Pull the raw entries for this week (there may be multiple entries for the same day)
+    val week by produceState<List<HomeDay>>(
+        initialValue = emptyList(),
+        key1 = isLoggedIn
+    ) {
+        value = if (!isLoggedIn) {
+            emptyList()
+        } else {
+            val uid = AuthRepository.currentUserId()
+            if (uid == null) emptyList() else repo.loadWeek(uid)
+        }
+    }
 
-    // Simple rule-based suggestion based on week context.
-    val suggestion = remember(week) { buildHomeSuggestion(week) }
+    // Key: Merge multiple logs of the same day into "daily" data
+    val daysForChart = remember(week) { aggregateWeek(week) }
 
-    // Display-friendly "today" string.
+    // Statistics and reminders are calculated based on the number of days recorded (the number of days recorded will be used as the calculation).
+    val hasData = daysForChart.isNotEmpty()
+    val avgMood  = if (hasData) daysForChart.map { it.mood }.average() else 0.0
+    val totalMin = if (hasData) daysForChart.sumOf { it.minutes } else 0
+    val avgTemp  = if (hasData) daysForChart.map { it.tempC }.average() else 0.0
+    val suggestion: String =
+        if (daysForChart.isNotEmpty()) buildHomeSuggestion(daysForChart)
+        else "No data yet. Log to see insights."
+
     val today = remember {
-        LocalDate.now().format(DateTimeFormatter.ofPattern("EEE, dd MMM", Locale.getDefault()))
+        LocalDate.now().format(
+            DateTimeFormatter.ofPattern("EEE, dd MMM", Locale.getDefault())
+        )
     }
 
     Column(
@@ -67,27 +76,19 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Title + date
         Text("Home", style = MaterialTheme.typography.headlineSmall)
         Text(today, style = MaterialTheme.typography.labelLarge, color = Color.Gray)
 
-        // Quick actions (two rows of cards).
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickActionCard("Log today", Icons.Filled.Edit, onQuickLog, Modifier.weight(1f))
             QuickActionCard("History", Icons.Filled.History, onGoHistory, Modifier.weight(1f))
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickActionCard("Insights", Icons.Filled.Assessment, onGoInsights, Modifier.weight(1f))
             QuickActionCard("Settings", Icons.Filled.Settings, onGoSettings, Modifier.weight(1f))
         }
 
-        // Summary card with stats + sparkline.
+        // Summary card: three statistics + a weekly chart
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = MaterialTheme.shapes.large,
@@ -96,32 +97,23 @@ fun HomeScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("This Week at a Glance", style = MaterialTheme.typography.titleMedium)
 
-                // Three compact stats.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HomeStat("Avg mood", String.format(Locale.getDefault(), "%.1f / 5", avgMood))
                     HomeStat("Exercise", "$totalMin min")
                     HomeStat("Avg temp", "${avgTemp.roundToInt()}°C")
                 }
 
-                // Minimal sparkline of mood across the week.
-                MiniMoodSparkline(
-                    values = week.map { it.mood.toFloat() },
-                    labels = week.map { it.date.dayOfWeek.name.take(3) },
+                HomeWeeklyChart(
+                    days = daysForChart,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
+                        .height(170.dp)
                 )
             }
         }
 
-        // Context-aware tip for the user.
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xFFB39DDB).copy(alpha = 0.12f)
-            ),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFB39DDB).copy(alpha = 0.12f)),
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -135,16 +127,8 @@ fun HomeScreen(
     }
 }
 
-/* ---------- UI Bits ---------- */
+/* ---------- UI bits ---------- */
 
-/**
- * Small tappable card used for the four quick actions on Home.
- *
- * @param title label shown next to the icon
- * @param icon  material icon to display
- * @param onClick invoked when the card is tapped
- * @param modifier optional layout modifier
- */
 @Composable
 private fun QuickActionCard(
     title: String,
@@ -170,12 +154,6 @@ private fun QuickActionCard(
     }
 }
 
-/**
- * Compact stat tile used inside the "Week at a Glance" row.
- *
- * @param label short label of the metric
- * @param value main value to emphasize
- */
 @Composable
 private fun HomeStat(
     label: String,
@@ -197,80 +175,186 @@ private fun HomeStat(
     }
 }
 
+/* ---------- Chart + helpers ---------- */
+
 /**
- * Minimal line chart (sparkline) for mood values across the week.
- * Draws a baseline, connects points with a rounded stroke, and renders x-axis labels.
- *
- * @param values mood values mapped to 1..5
- * @param labels short day-of-week labels aligned with values
+ * Combine multiple logs from the same day into "daily data":
+ * - minutes: sum
+ * - tempC: average rounding
+ * - mood: average rounding
+ */
+private fun aggregateWeek(raw: List<HomeDay>): List<HomeDay> {
+    return raw
+        .groupBy { it.date }
+        .map { (date, items) ->
+            val minutesSum = items.sumOf { it.minutes }
+            val tempAvg    = items.map { it.tempC }.average().toInt()
+            val moodAvg    = items.map { it.mood }.average().toInt()
+            HomeDay(date = date, mood = moodAvg, minutes = minutesSum, tempC = tempAvg)
+        }
+        .sortedBy { it.date }
+}
+
+
+/**
+ * Weekly chart:
+ * - The vertical axis is fixed at 0–40°C, with only the 20° and 40° tick marks displayed (the bottom baseline is 0°).
+ * - The bar height represents the temperature; the "minutes" are displayed above the top of the bar, followed by the "emoji" above.
+ * - The day of the week is displayed below (MON/TUE/...).
  */
 @Composable
-private fun MiniMoodSparkline(
-    values: List<Float>,
-    labels: List<String>,
-    modifier: Modifier = Modifier
+private fun HomeWeeklyChart(
+    days: List<HomeDay>,
+    modifier: Modifier = Modifier,
+    barColor: Color = Color(0xFFB39DDB),
+    axisColor: Color = Color(0x33000000),
+    textColor: Color = Color(0xFF424242),
+    showEmoji: Boolean = true
 ) {
-    // Fixed mood range.
-    val minY = 1f
-    val maxY = 5f
-    Canvas(modifier) {
-        val left = 36f
-        val right = size.width - 8f
-        val top = 8f
-        val bottom = size.height - 28f
+    if (days.isEmpty()) {
+        Box(
+            modifier = modifier.height(200.dp).fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) { Text("No data this week yet") }
+        return
+    }
 
-        // X-axis baseline
-        drawLine(Color.LightGray, Offset(left, bottom), Offset(right, bottom), 2f)
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(220.dp)
+    ) {
+        /* ---- Layout constants ---- */
+        val gutterLeft = 56f
+        val gutterRight = 12f
+        val gutterTop = 12f
+        val gutterBottom = 56f
+        val left = gutterLeft
+        val right = size.width - gutterRight
+        val top = gutterTop
+        val bottom = size.height - gutterBottom
+        val chartW = right - left
+        val chartH = bottom - top
 
-        // Compute x-step and draw connected points.
-        val stepX = (right - left) / (values.size - 1).coerceAtLeast(1)
-        val path = Path()
-        values.forEachIndexed { i, v ->
-            val x = left + i * stepX
-            val y = bottom - (v - minY) / (maxY - minY) * (bottom - top)
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-            drawCircle(Color(0xFF7E57C2), radius = 5f, center = Offset(x, y))
+
+        fun yOfTemp(t: Int): Float {
+            val v = t.coerceIn(0, 40)
+            return bottom - (v / 40f) * chartH
         }
-        drawPath(path, Color(0xFF7E57C2), style = Stroke(width = 4f, cap = StrokeCap.Round))
 
-        // X-axis text labels (nativeCanvas used for simple text draw).
-        labels.forEachIndexed { i, s ->
-            val x = left + i * stepX
+
+        val tickPaint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = textColor.copy(alpha = 0.70f).toArgb()
+            textSize = 26f
+        }
+        // Draw only the 20°/40° lines and the 0° baseline
+        val ticks = listOf(20, 40)
+        // 0° baseline
+        drawLine(axisColor, Offset(left, bottom), Offset(right, bottom), 2f)
+        drawContext.canvas.nativeCanvas.drawText("0°", left - 28f, bottom + 8f, tickPaint)
+        // 20° / 40°
+        for (deg in ticks) {
+            val y = yOfTemp(deg)
+            drawLine(axisColor, Offset(left, y), Offset(right, y), 1.5f)
+            drawContext.canvas.nativeCanvas.drawText("${deg}°", left - 36f, y + 8f, tickPaint)
+        }
+
+        /* ---- X-axis distribution ---- */
+        val n = days.size
+        val step = if (n > 1) chartW / (n - 1) else chartW
+        val inset = if (n > 1) step * 0.12f else 0f
+        val startX = left + inset
+        val endX = right - inset
+        val effStep = if (n > 1) (endX - startX) / (n - 1) else 0f
+
+
+        val labelPaint = android.graphics.Paint().apply {
+            isAntiAlias = true; color = textColor.toArgb(); textSize = 28f
+        }
+        val minutesPaint = android.graphics.Paint().apply {
+            isAntiAlias = true; color = textColor.copy(alpha = 0.80f).toArgb(); textSize = 26f
+        }
+        val emojiPaint = android.graphics.Paint().apply {
+            isAntiAlias = true; textSize = 30f
+        }
+
+        /* ---- Column width and spacing ---- */
+        val barW = minOf(26f, if (n > 1) effStep * 0.38f else 24f)
+        val barFloorGap = 3f
+        val gapMinutesToBar = 12f
+        val gapEmojiToMinutes = 20f
+        val gapDayToAxis = 18f
+
+        /* ---- draw each day ---- */
+        days.forEachIndexed { i, d ->
+            val cx = startX + i * effStep
+            val barTop = yOfTemp(d.tempC)
+
+            // 1) Temperature column (height determined by temperature)
+            drawRoundRect(
+                color = barColor,
+                topLeft = Offset(cx - barW / 2f, barTop + barFloorGap),
+                size = androidx.compose.ui.geometry.Size(
+                    barW,
+                    (bottom - barFloorGap) - barTop
+                ),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f)
+            )
+
+            // 2) Exercise time above the top of the column (centered)
+            val minText = "${d.minutes}min"
+            val minW = minutesPaint.measureText(minText)
             drawContext.canvas.nativeCanvas.drawText(
-                s,
-                x - 18f,
-                bottom + 18f,
-                android.graphics.Paint().apply {
-                    color = android.graphics.Color.DKGRAY
-                    textSize = 28f
-                    isAntiAlias = true
+                minText,
+                cx - minW / 2f,
+                barTop - gapMinutesToBar,
+                minutesPaint
+            )
+
+            // 3) Minutes above emoji (centered)
+            if (showEmoji) {
+                val emoji = when (d.mood.coerceIn(1, 5)) {
+                    5 -> "😄"; 4 -> "🙂"; 3 -> "😐"; 2 -> "🙁"; else -> "😖"
                 }
+                val emojiW = emojiPaint.measureText(emoji)
+                drawContext.canvas.nativeCanvas.drawText(
+                    emoji,
+                    cx - emojiW / 2f,
+                    barTop - gapMinutesToBar - gapEmojiToMinutes,
+                    emojiPaint
+                )
+            }
+
+            // 4) X-axis (English short name, centered)
+            val dayLabel = d.date.dayOfWeek
+                .getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+                .uppercase(java.util.Locale.getDefault())
+            val dayW = labelPaint.measureText(dayLabel)
+            drawContext.canvas.nativeCanvas.drawText(
+                dayLabel,
+                cx - dayW / 2f,
+                bottom + gapDayToAxis,
+                labelPaint
             )
         }
     }
 }
 
-/* ---------- Demo data + suggestion ---------- */
 
-/** Simple daily data model for the Home weekly summary. */
-private data class HomeDay(val date: LocalDate, val mood: Int, val minutes: Int, val tempC: Int)
 
-/** Generate a seven-day window ending today (demo-only). */
-private fun generateHomeWeek(): List<HomeDay> {
-    val end = LocalDate.now()
-    val start = end.minusDays(6)
-    val temps = listOf(18, 22, 26, 31, 33, 29, 21)
-    val moods = listOf(3, 4, 3, 2, 4, 5, 3)
-    val minutes = listOf(20, 35, 15, 10, 40, 50, 25)
-    return (0..6).map { i ->
-        HomeDay(start.plusDays(i.toLong()), moods[i], minutes[i], temps[i])
-    }
+
+
+private fun emojiFromMood(mood: Int): String = when (mood.coerceIn(1, 5)) {
+    5 -> "😄"   // very happy
+    4 -> "🙂"   // happy
+    3 -> "😐"   // normal
+    2 -> "🙁"   // sad
+    else -> "😖" // very sad
 }
 
-/**
- * Build a human-readable tip based on average temperature, total exercise,
- * and average mood for the week.
- */
+/* ---------- Suggestion ---------- */
+
 private fun buildHomeSuggestion(week: List<HomeDay>): String {
     val avgTemp = week.map { it.tempC }.average()
     val totalMin = week.sumOf { it.minutes }
