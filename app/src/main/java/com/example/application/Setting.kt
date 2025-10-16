@@ -73,6 +73,20 @@ fun SettingsScreen(
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val isFineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val isCoarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (isFineLocationGranted || isCoarseLocationGranted) {
+            scope.launch { snack.showSnackbar("Location permission granted. You can now enable background updates.") }
+            // 可以在这里再次尝试启动 Worker，如果用户是刚刚授权的话
+        } else {
+            scope.launch { snack.showSnackbar("Location permission denied. Background updates cannot be enabled.") }
+        }
+    }
+
     // Format DOB
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDob(ms: Long?) =
@@ -219,9 +233,39 @@ fun SettingsScreen(
                 checked = bgUpdates,
                 enabled = loggedIn,
                 onCheckedChange = { checked ->
-                    bgUpdates = checked
                     if (!loggedIn) return@SettingSwitchRow
-                    if (checked) ContextIngestWorker.enqueue(context) else ContextIngestWorker.cancel(context)
+
+                    if (checked) {
+                        // --- 修改：用户想要开启任务 ---
+                        // 1. 检查权限
+                        val hasFineLocationPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        val hasCoarseLocationPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (hasFineLocationPermission || hasCoarseLocationPermission) {
+                            // 2. 如果已有权限，则更新状态并启动 Worker
+                            bgUpdates = true
+                            ContextIngestWorker.enqueue(context)
+                            scope.launch { snack.showSnackbar("Background updates enabled.") }
+                        } else {
+                            // 3. 如果没有权限，则请求权限
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        }
+                    } else {
+                        // --- 用户想要关闭任务 ---
+                        bgUpdates = false
+                        ContextIngestWorker.cancel(context)
+                        scope.launch { snack.showSnackbar("Background updates disabled.") }
+                    }
                 }
             )
 
