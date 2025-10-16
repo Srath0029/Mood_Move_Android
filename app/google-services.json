@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "626852858933",
+    "project_id": "moodmove-8989e",
+    "storage_bucket": "moodmove-8989e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:626852858933:android:61819e52da38968861b57c",
+        "android_client_info": {
+          "package_name": "com.example.application"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-Gm5j8bKDM5ckQtxcTbUlLipv7xghlFM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
