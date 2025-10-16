@@ -16,14 +16,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
+import androidx.compose.runtime.collectAsState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
     val navController = rememberNavController()
+// Read login status
+    val isLoggedIn by AuthRepository.isLoggedIn.collectAsState(initial = false)
+
+// Remember the route the user wanted to go but was blocked, and jump back after successful login
+    var pendingRoute by remember { mutableStateOf<String?>(null) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-
+    val context = LocalContext.current
     val BrandPurple = Color(0xFFB39DDB)
     val BrandOnPurple = Color.White
     val BrandOnPurpleFaded = Color.White.copy(alpha = 0.80f)
@@ -37,7 +43,6 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
     )
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val context = LocalContext.current
     val workInfos by remember {
         androidx.work.WorkManager.getInstance(context)
             .getWorkInfosForUniqueWorkLiveData(ContextIngestWorker.UNIQUE_NAME)
@@ -59,6 +64,24 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         }
     }
 
+
+    fun navigateGuarded(route: String) {
+        // These are routes that are accessible even when not logged in.
+        val unprotected = setOf(
+            Destination.SETTINGS.route,
+            Destination.LOGIN.route,
+            Destination.REGISTER.route,
+            Destination.FORGOT.route
+        )
+
+        if (!isLoggedIn && route !in unprotected) {
+            pendingRoute = route                 // Record where you want to go
+            navigateSingleTopTo(Destination.LOGIN.route)
+        } else {
+            navigateSingleTopTo(route)
+        }
+    }
+
     val title = when (currentRoute) {
         Destination.HOME.route     -> "Home"
         Destination.LOG.route      -> "Log"
@@ -69,6 +92,9 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         Destination.SETTINGS.route -> "Settings"
         else                       -> "Navigation Bar Demo App"
     }
+
+
+
 
     Scaffold(
         topBar = {
@@ -92,7 +118,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                         icon = { Icon(dest.icon, contentDescription = dest.label) },
                         label = { Text(dest.label) },
                         selected = currentRoute == dest.route,
-                        onClick = { navigateSingleTopTo(dest.route) },
+                        onClick = { navigateGuarded(dest.route) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = BrandOnPurple,
                             selectedTextColor = BrandOnPurple,
@@ -117,12 +143,15 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                     onGoRegister = { navigateSingleTopTo(Destination.REGISTER.route) },
                     onForgotPassword = { navigateSingleTopTo(Destination.FORGOT.route) },
                     onLoggedIn = {
-                        navController.navigate(Destination.SETTINGS.route) {
-                            popUpTo(Destination.LOGIN.route) { inclusive = true }
+                        val target = pendingRoute ?: Destination.HOME.route
+                        pendingRoute = null
+                        navController.navigate(target) {
+                            popUpTo(navController.graph.findStartDestination().id) { inclusive = false; saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
                     }
+
                 )
             }
             composable(Destination.REGISTER.route) {
@@ -134,7 +163,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                             restoreState = true
                         }
                     },
-                    // ✅ NEW: go to Login immediately after successful registration
+                    //  NEW: go to Login immediately after successful registration
                     onRegistered = {
                         navController.navigate(Destination.LOGIN.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -168,10 +197,10 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             // --- Main tabs ---
             composable(Destination.HOME.route) {
                 HomeScreen(
-                    onQuickLog   = { navigateSingleTopTo(Destination.LOG.route) },
-                    onGoHistory  = { navigateSingleTopTo(Destination.HISTORY.route) },
-                    onGoInsights = { navigateSingleTopTo(Destination.INSIGHTS.route) },
-                    onGoSettings = { navigateSingleTopTo(Destination.SETTINGS.route) }
+                    onQuickLog   = { navigateGuarded(Destination.LOG.route) },
+                    onGoHistory  = { navigateGuarded(Destination.HISTORY.route) },
+                    onGoInsights = { navigateGuarded(Destination.INSIGHTS.route) },
+                    onGoSettings = { navigateGuarded(Destination.SETTINGS.route) } // Settings 放行
                 )
             }
             composable(Destination.LOG.route)      { LogScreen() }
