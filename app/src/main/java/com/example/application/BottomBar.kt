@@ -166,7 +166,14 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
             }
 
             // --- Main tabs ---
-            composable(Destination.HOME.route)     { HomeScreen() }
+            composable(Destination.HOME.route) {
+                HomeScreen(
+                    onQuickLog   = { navigateSingleTopTo(Destination.LOG.route) },
+                    onGoHistory  = { navigateSingleTopTo(Destination.HISTORY.route) },
+                    onGoInsights = { navigateSingleTopTo(Destination.INSIGHTS.route) },
+                    onGoSettings = { navigateSingleTopTo(Destination.SETTINGS.route) }
+                )
+            }
             composable(Destination.LOG.route)      { LogScreen() }
             composable(Destination.HISTORY.route)  { HistoryScreen() }
             composable(Destination.INSIGHTS.route) { InsightsScreen() }
