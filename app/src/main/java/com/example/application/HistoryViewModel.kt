@@ -83,7 +83,9 @@ class HistoryViewModel : ViewModel() {
                             dateMillis = exerciseLog.dateMillis ?: 0L,
                             mood = exerciseLog.moodScore,
                             type = exerciseLog.exerciseType,
-                            minutes = minutes
+                            minutes = minutes,
+                            startTime = exerciseLog.startTime ?: "",
+                            endTime = exerciseLog.endTime ?: ""
                         )
                     }
                     _uiState.update { it.copy(isLoading = false, logs = logEntries) }
@@ -102,6 +104,27 @@ class HistoryViewModel : ViewModel() {
         db.collection("logs").document(logId).delete()
             .addOnSuccessListener { Log.d("HistoryViewModel", "DocumentSnapshot successfully deleted!") }
             .addOnFailureListener { e -> Log.w("HistoryViewModel", "Error deleting document", e) }
+    }
+
+    fun updateLog(
+        logId: String,
+        newDateMillis: Long,
+        newMood: Int,
+        newType: String,
+        newStartTime: String,
+        newEndTime: String
+    ) {
+        val updates = mapOf(
+            "dateMillis" to newDateMillis,
+            "moodScore" to newMood,
+            "exerciseType" to newType,
+            "startTime" to newStartTime,
+            "endTime" to newEndTime
+        )
+
+        db.collection("logs").document(logId).update(updates)
+            .addOnSuccessListener { Log.d("HistoryViewModel", "DocumentSnapshot successfully updated!") }
+            .addOnFailureListener { e -> Log.w("HistoryViewModel", "Error updating document", e) }
     }
 
     private fun calculateDuration(startTimeStr: String?, endTimeStr: String?): Int {
