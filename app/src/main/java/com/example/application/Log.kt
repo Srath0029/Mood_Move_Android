@@ -39,6 +39,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
+import com.example.application.OpenWeatherRetrofit
 
 private enum class TimePickerTarget { START, END }
 
@@ -407,7 +408,7 @@ fun LogScreen() {
                     initialMinute = if (isStartTimePicker) selectedStartTime?.minute ?: LocalTime.now().minute else selectedEndTime?.minute ?: LocalTime.now().minute,
                     is24Hour = true
                 )
-                // 1. 修改状态变量，使其能保存具体的错误信息
+                // 1. Modify the state variable so that it can save specific error information
                 var showTimePickerError by remember { mutableStateOf(false) }
                 var timePickerErrorMessage by remember { mutableStateOf("") }
 
@@ -420,7 +421,7 @@ fun LogScreen() {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             TimePicker(state = timeState)
 
-                            // 3. 更新UI以显示错误信息
+                            // 3. Update the UI to display error information
                             if (showTimePickerError) {
                                 Text(
                                     modifier = Modifier.padding(top = 8.dp),
@@ -560,38 +561,37 @@ fun LogScreen() {
 
 
 // --- Weather API call function ---
-
-private val ktorClient = HttpClient(Android) {
-    install(ContentNegotiation) {
-        json(Json {
-            ignoreUnknownKeys = true
-        })
-    }
-}
-
-@Serializable
-private data class HistoricalWeatherResponse(val data: List<HistoricalData>)
-
-@Serializable
-private data class HistoricalData(val temp: Double)
 private suspend fun getTemperature(
     latitude: Double,
     longitude: Double,
     dateMillis: Long,
     startTime: LocalTime
 ): Double? {
-    val selectedDate = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+    val selectedDate = Instant.ofEpochMilli(dateMillis)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
     val selectedDateTime = selectedDate.atTime(startTime)
-    val timestamp = selectedDateTime.atZone(ZoneId.systemDefault()).toEpochSecond()
+    val timestamp = selectedDateTime
+        .atZone(ZoneId.systemDefault())
+        .toEpochSecond()
+
 
     val apiKey = "197d431fa550c96a045c38749be83926"
-    val url = "https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=$latitude&lon=$longitude&dt=$timestamp&appid=$apiKey&units=metric"
 
     return try {
-        val response: HistoricalWeatherResponse = ktorClient.get(url).body()
-        response.data.firstOrNull()?.temp
+        val resp = OpenWeatherRetrofit.api.timeMachine(
+            lat = latitude,
+            lon = longitude,
+            dt = timestamp,
+            apiKey = apiKey,
+            units = "metric"
+        )
+
+        resp.current?.temp
+            ?: resp.hourly?.firstOrNull()?.temp
+            ?: resp.data?.firstOrNull()?.temp
     } catch (e: Exception) {
-        Log.e("WeatherApi", "Failed to obtain historical temperature", e)
+        Log.e("WeatherApi", "Retrofit timemachine failed", e)
         null
     }
 }
