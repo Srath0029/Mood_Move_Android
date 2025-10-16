@@ -4,174 +4,123 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 /**
- * ForgotPasswordScreen
+ * ForgotPasswordScreen (email-only reset).
  *
- * UI for resetting a password via email + verification code.
- * The form collects:
- *  - Email address (validated)
- *  - 6-digit verification code (numeric)
- *  - New password (>= 8 chars and includes a digit)
- *  - Confirm new password (must match)
+ * - Validates email.
+ * - Sends reset email with sendPasswordResetEmail (no user-enumeration).
  *
- * @param onSubmit            invoked when all fields are valid and user taps Submit
- * @param onBackToLogin       invoked when user taps "Back to Login"
+ * NOTE: onSubmit kept for backward compatibility but not used.
  */
 @Composable
 fun ForgotPasswordScreen(
-    onSubmit: (email: String, code: String, newPassword: String) -> Unit = { _, _, _ -> },
+    onSubmit: (email: String, code: String, newPassword: String) -> Unit = { _, _, _ -> }, // unused
     onBackToLogin: () -> Unit = {}
 ) {
-    // ---------- Form state ----------
-    var email by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }           // 6 digits
-    var newPwd by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
-    var showNew by remember { mutableStateOf(false) }     // toggle new password visibility
-    var showConfirm by remember { mutableStateOf(false) } // toggle confirm visibility
-    var attempted by remember { mutableStateOf(false) }   // set after first submit attempt
+    // ---- Form state ----
+    var email by rememberSaveable { mutableStateOf("") }
 
-    // ---------- Validation helpers ----------
+    // ---- Validation ----
     fun isEmailValid(s: String) =
         android.util.Patterns.EMAIL_ADDRESS.matcher(s).matches()
-    fun isPwdValid(s: String) = s.length >= 8 && s.any(Char::isDigit)
-    fun isCodeValid(s: String) = s.length == 6 && s.all(Char::isDigit)
+    val emailErr = email.isNotEmpty() && !isEmailValid(email)
+    val formValid = isEmailValid(email)
 
-    // ---------- Validity flags ----------
-    val emailValid   = isEmailValid(email)
-    val codeValid    = isCodeValid(code)
-    val newPwdValid  = isPwdValid(newPwd)
-    val confirmValid = confirm == newPwd && newPwdValid
+    // ---- UI state ----
+    val scope = rememberCoroutineScope()
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val snack = remember { SnackbarHostState() }
 
-    // Show errors early: after first submit or once user has typed in a field
-    fun showErr(typed: Boolean) = attempted || typed
+    Scaffold(
+        snackbarHost = {
+            SnackbarHost(snack) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = Color(0xFF2E7D32), // green
+                    contentColor = Color.White
+                )
+            }
+        }
+    ) { inner ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Forgot Password", style = MaterialTheme.typography.headlineSmall)
 
-    // ---------- Error states for inline messages ----------
-    val emailErr   = showErr(email.isNotEmpty())   && !emailValid
-    val codeErr    = showErr(code.isNotEmpty())    && !codeValid
-    val newPwdErr  = showErr(newPwd.isNotEmpty())  && !newPwdValid
-    val confirmErr = showErr(confirm.isNotEmpty()) && !confirmValid
+            if (loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+            if (errorMsg != null) {
+                Text(errorMsg!!, color = MaterialTheme.colorScheme.error)
+            }
 
-    // Entire form valid only if all fields pass validation
-    val formValid = emailValid && codeValid && newPwdValid && confirmValid
+            // Email
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it; errorMsg = null },
+                label = { Text("Email") },
+                singleLine = true,
+                isError = emailErr,
+                supportingText = { Text(if (emailErr) "Please enter a valid email" else " ") },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Done
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
 
-    // ---------- Layout ----------
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()) // allow content to scroll under smaller screens/keyboard
-            .navigationBarsPadding()
-            .imePadding()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("Forgot Password", style = MaterialTheme.typography.headlineSmall)
+            // Send reset email
+            Button(
+                enabled = formValid && !loading,
+                onClick = {
+                    loading = true
+                    errorMsg = null
+                    scope.launch {
+                        try {
+                            Firebase.auth
+                                .sendPasswordResetEmail(email.trim())
+                                .await()
 
-        // Email input with inline validation
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
-            singleLine = true,
-            isError = emailErr,
-            supportingText = {
-                Text(if (emailErr) "Please enter a valid email" else " ")
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
+                            // Neutral message to avoid user-enumeration
+                            snack.showSnackbar("If an account exists for this email, a reset link has been sent.")
+                            delay(1200)
+                            onBackToLogin()
+                        } catch (e: Exception) {
+                            errorMsg = e.localizedMessage ?: "Failed to send reset email."
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Send reset email") }
 
-        // 6-digit verification code (numeric only)
-        OutlinedTextField(
-            value = code,
-            onValueChange = { input -> code = input.filter(Char::isDigit).take(6) },
-            label = { Text("Verification code") },
-            singleLine = true,
-            isError = codeErr,
-            supportingText = {
-                Text(if (codeErr) "Enter the 6-digit code" else "${code.length}/6 digits")
-            },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Next
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // New password with show/hide toggle and strength rule
-        OutlinedTextField(
-            value = newPwd,
-            onValueChange = { newPwd = it },
-            label = { Text("New password") },
-            singleLine = true,
-            visualTransformation = if (showNew) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { showNew = !showNew }) {
-                    Icon(
-                        if (showNew) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (showNew) "Hide password" else "Show password"
-                    )
-                }
-            },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Next
-            ),
-            isError = newPwdErr,
-            supportingText = {
-                Text(if (newPwdErr) "Min 8 characters and include a number" else "At least 8 chars + a number")
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // Confirm password with show/hide toggle and match rule
-        OutlinedTextField(
-            value = confirm,
-            onValueChange = { confirm = it },
-            label = { Text("Confirm new password") },
-            singleLine = true,
-            visualTransformation = if (showConfirm) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                IconButton(onClick = { showConfirm = !showConfirm }) {
-                    Icon(
-                        if (showConfirm) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = if (showConfirm) "Hide password" else "Show password"
-                    )
-                }
-            },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Done
-            ),
-            isError = confirmErr,
-            supportingText = {
-                Text(if (confirmErr) "Passwords do not match" else " ")
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // Submit only when form is valid; sets 'attempted' to reveal errors if pressed too early
-        Button(
-            enabled = formValid,
-            onClick = {
-                attempted = true
-                if (formValid) onSubmit(email.trim(), code.trim(), newPwd)
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Submit") }
-
-        // Optional back link to return to the Login screen
-        TextButton(onClick = onBackToLogin, modifier = Modifier.align(Alignment.End)) {
-            Text("Back to Login")
+            TextButton(onClick = onBackToLogin, modifier = Modifier.align(Alignment.End)) {
+                Text("Back to Login")
+            }
         }
     }
 }
