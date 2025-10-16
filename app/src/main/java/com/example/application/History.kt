@@ -9,6 +9,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,23 +26,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** Model of a single historical log item shown in the list. */
 data class LogEntry(
-    val id: Long,
+    val id: String, // ID 现在是 String 类型
     val dateMillis: Long,
-    val mood: Int,       // 1..5 scale (Very sad .. Very happy)
-    val type: String,    // Activity type (Walk / Run / Cycling / ...)
-    val minutes: Int     // Activity duration in minutes
+    val mood: Int,
+    val type: String,
+    val minutes: Int
 )
 
 /** Sorting options for the history list. */
@@ -54,25 +55,23 @@ private enum class SortOption(val label: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
+    // 1. 注入 ViewModel
+    viewModel: HistoryViewModel = viewModel(),
     onEdit: (LogEntry) -> Unit = {},
     onView: (LogEntry) -> Unit = {}
 ) {
-    // Demo list kept in memory (replace with Room in the future).
-    val initial = remember { mutableStateListOf<LogEntry>().apply { addAll(sampleLogs()) } }
+    // 2. 从 ViewModel 中安全地收集UI状态
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Search and filter state.
+    // --- 筛选和对话框的状态保持不变 ---
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(SortOption.NEWEST) }
-
-    // Date-range pickers (From / To).
     var fromOpen by remember { mutableStateOf(false) }
     var toOpen by remember { mutableStateOf(false) }
     var fromMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     var toMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     val fromState = rememberDatePickerState(initialSelectedDateMillis = fromMillis)
     val toState = rememberDatePickerState(initialSelectedDateMillis = toMillis)
-
-    // Dialog state for view and delete confirmations.
     var viewing by remember { mutableStateOf<LogEntry?>(null) }
     var deleting by remember { mutableStateOf<LogEntry?>(null) }
 
@@ -83,9 +82,9 @@ fun HistoryScreen(
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
         } ?: "Any"
 
-    // Apply query filter, date-range filter, and sort order.
-    val filteredSorted = remember(query, fromMillis, toMillis, sort, initial) {
-        initial
+    // --- 过滤和排序逻辑现在作用于从数据库加载的数据 ---
+    val filteredSorted = remember(query, fromMillis, toMillis, sort, uiState.logs) { // <-- 改动1
+        uiState.logs // <-- 改动2：数据源现在是 uiState.logs
             .asSequence()
             .filter { e ->
                 val matchesQuery =
@@ -131,34 +130,25 @@ fun HistoryScreen(
         // Keep all filter controls equal height for visual consistency.
         val controlHeight = 48.dp
 
-        // Filters row: From / To / Sort (each uses weight(1f) to be same width).
+        // Filters row: From / To / Sort
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // From date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("From", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { fromOpen = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(controlHeight)
+                    modifier = Modifier.fillMaxWidth().height(controlHeight)
                 ) { Text(formatDate(fromMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-
-            // To date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("To", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { toOpen = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(controlHeight)
+                    modifier = Modifier.fillMaxWidth().height(controlHeight)
                 ) { Text(formatDate(toMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-
-            // Sort dropdown button.
             SortMenu(
                 current = sort,
                 onChange = { sort = it },
@@ -169,20 +159,33 @@ fun HistoryScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Scrollable list of entries.
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(filteredSorted, key = { it.id }) { entry ->
-                HistoryRow(
-                    entry = entry,
-                    onView = { viewing = it; onView(it) },
-                    onEdit = onEdit,
-                    onDelete = { deleting = it }
-                )
+        // --- 4. 核心UI区域：根据加载状态显示不同内容 ---
+        if (uiState.isLoading) {
+            // 正在加载时，显示一个居中的加载动画
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-            item { Spacer(Modifier.height(8.dp)) }
+        } else if (filteredSorted.isEmpty()) {
+            // 加载完成但列表为空时，显示提示信息
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (uiState.logs.isEmpty()) "No logs yet." else "No logs match your filters.")
+            }
+        } else {
+            // 有数据时，显示 LazyColumn
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(filteredSorted, key = { it.id }) { entry ->
+                    HistoryRow(
+                        entry = entry,
+                        onView = { viewing = it; onView(it) },
+                        onEdit = onEdit,
+                        onDelete = { deleting = it }
+                    )
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
         }
     }
 
@@ -239,8 +242,8 @@ fun HistoryScreen(
             onDismissRequest = { deleting = null },
             confirmButton = {
                 TextButton(onClick = {
-                    val idx = initial.indexOfFirst { it.id == e.id }
-                    if (idx >= 0) initial.removeAt(idx)
+                    // --- 5. 关键改动：调用 ViewModel 的 deleteLog 函数 ---
+                    viewModel.deleteLog(e.id)
                     deleting = null
                 }) { Text("Delete") }
             },
@@ -252,8 +255,7 @@ fun HistoryScreen(
 }
 
 /**
- * Card row for a single log entry with date, mood badge, activity summary,
- * and quick actions (View/Edit/Delete).
+ * Card row for a single log entry.
  */
 @Composable
 private fun HistoryRow(
@@ -294,7 +296,7 @@ private fun HistoryRow(
     }
 }
 
-/** Small colored label showing the mood category based on the 1..5 mood score. */
+/** Small colored label showing the mood category. */
 @Composable
 private fun MoodBadge(mood: Int) {
     val label = when (mood) {
@@ -321,7 +323,7 @@ private fun MoodBadge(mood: Int) {
     )
 }
 
-/** Sort menu button + dropdown list of [SortOption] choices. */
+/** Sort menu button + dropdown list. */
 @Composable
 private fun SortMenu(
     current: SortOption,
@@ -350,28 +352,11 @@ private fun SortMenu(
     }
 }
 
-// --- Helpers & sample data ---
+// --- Helpers ---
 
 /** Format an epoch millis value to a short yyyy-MM-dd string. */
-private fun formatDateOnly(ms: Long): String =
-    Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+private fun formatDateOnly(ms: Long?): String {
+    if (ms == null) return "Any"
+    return Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()))
-
-/** Generate simple demo logs for preview/testing the history UI. */
-private fun sampleLogs(): List<LogEntry> {
-    val today = LocalDate.now()
-    val types = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
-    val moods = listOf(3, 4, 2, 5, 3, 4, 1, 5, 2, 3)
-    val mins = listOf(15, 30, 10, 45, 25, 35, 20, 50, 12, 40)
-
-    return (0 until 10).map { i ->
-        val date = today.minusDays(i.toLong()).atStartOfDay(ZoneId.systemDefault()).toInstant()
-        LogEntry(
-            id = i.toLong(),
-            dateMillis = date.toEpochMilli(),
-            mood = moods[i % moods.size],
-            type = types[i % types.size],
-            minutes = mins[i % mins.size]
-        )
-    }
 }
