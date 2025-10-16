@@ -36,7 +36,7 @@ class HistoryViewModel : ViewModel() {
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
 
     init {
-        // 2. ViewModel 创建时，不再直接加载数据，而是开始监听用户的登录状态
+        // 2. When ViewModel is created, it no longer loads data directly, but starts monitoring the user's login status
         createAuthStateListener()
     }
 
@@ -44,24 +44,24 @@ class HistoryViewModel : ViewModel() {
         authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
-                // 如果用户登录了，就开始监听该用户的数据库记录
+                // If the user is logged in, start monitoring the user's database records
                 Log.d("HistoryViewModel", "Auth state changed: User logged in (${user.uid})")
                 startLogsListener(user.uid)
             } else {
-                // 如果用户退出了，就停止所有监听并清空UI
+                // If the user exits, stop all monitoring and clear the UI
                 Log.d("HistoryViewModel", "Auth state changed: User logged out")
                 stopLogsListener()
             }
         }
-        // 将监听器附加到 auth 实例上
+        // Attach the listener to the auth instance
         auth.addAuthStateListener(authStateListener!!)
     }
 
     private fun startLogsListener(userId: String) {
-        // 在启动新监听之前，确保旧的监听已经被移除，防止重复监听
+        // Before starting a new monitor, make sure the old monitor has been removed to prevent duplicate monitoring
         logsListener?.remove()
 
-        _uiState.update { it.copy(isLoading = true) } // 开始加载数据，显示加载动画
+        _uiState.update { it.copy(isLoading = true) }
 
         logsListener = db.collection("logs")
             .whereEqualTo("userId", userId)
@@ -94,9 +94,9 @@ class HistoryViewModel : ViewModel() {
     }
 
     private fun stopLogsListener() {
-        // 停止数据库监听
+        // Stop database monitoring
         logsListener?.remove()
-        // 将UI状态重置为“未登录”状态
+        // Reset the UI state to "not logged in"
         _uiState.update { HistoryUiState(isLoading = false, logs = emptyList()) }
     }
 
@@ -139,10 +139,10 @@ class HistoryViewModel : ViewModel() {
         }
     }
 
-    // 当 ViewModel 被销毁时，这个方法会被自动调用
+    // This method will be called automatically when the ViewModel is destroyed
     override fun onCleared() {
         super.onCleared()
-        // 必须在这里移除所有监听器，防止内存泄漏
+        // All listeners must be removed here to prevent memory leaks
         authStateListener?.let { auth.removeAuthStateListener(it) }
         logsListener?.remove()
         Log.d("HistoryViewModel", "ViewModel cleared and listeners removed.")

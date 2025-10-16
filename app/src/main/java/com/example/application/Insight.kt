@@ -31,6 +31,8 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 // --- Sample weekly data model (replace with Room+Retrofit later) ---
 
@@ -43,79 +45,58 @@ import kotlinx.coroutines.delay
  */
 data class DayInsight(
     val date: LocalDate,
-    val mood: Int,        // 1..5 (Very sad .. Very happy)
-    val minutes: Int,     // exercise minutes
-    val tempC: Int        // weather (°C)
+    val mood: Int,
+    val minutes: Int,
+    val tempC: Int
 )
 
-/**
- * Returns seven demo rows (ending today) for previewing charts.
- * In production this will be replaced by Room (logs) + Retrofit (weather).
- */
-private fun demoWeek(): List<DayInsight> {
-    val end = LocalDate.now()
-    val start = end.minusDays(6)
-    val temps = listOf(18, 21, 23, 27, 31, 33, 29)
-    val moods = listOf(3, 4, 3, 2, 4, 5, 3)
-    val minutes = listOf(20, 35, 15, 10, 40, 50, 25)
-    return (0..6).map { i ->
-        DayInsight(start.plusDays(i.toLong()), moods[i], minutes[i], temps[i])
-    }
-}
-
-/**
- * Top-level Insights screen:
- * - Simulates a short "loading" state.
- * - Crossfades to the insights content with charts and tips.
- */
 @Composable
-fun InsightsScreen() {
-    var loading by remember { mutableStateOf(true) }
-    val week by remember { mutableStateOf(demoWeek()) }
-
-    // Simulate I/O to demonstrate a progress indicator.
-    LaunchedEffect(Unit) { delay(600); loading = false }
+fun InsightsScreen(
+    viewModel: InsightsViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        // Crossfade provides a subtle transition between loading and content.
-        Crossfade(targetState = loading, label = "insights-load") { isLoading ->
+        Crossfade(targetState = uiState.isLoading, label = "insights-load") { isLoading ->
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             } else {
-                InsightsContent(week)
+                if (uiState.insights.isEmpty() || uiState.insights.all { it.minutes == 0 }) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Log some activities to see your insights!", style = MaterialTheme.typography.bodyLarge)
+                    }
+                } else {
+                    InsightsContent(uiState.insights)
+                }
             }
         }
     }
 }
 
-/**
- * Insights body: renders KPI cards, two charts, and a context-aware tip.
- */
 @Composable
 private fun InsightsContent(week: List<DayInsight>) {
-    // Aggregate metrics used in summary cards.
-    val avgMood = week.map { it.mood }.average()
+    val moodsWithData = week.filter { it.mood > 0 }
+    val avgMood = if (moodsWithData.isNotEmpty()) moodsWithData.map { it.mood }.average() else 0.0
     val totalMin = week.sumOf { it.minutes }
-    val avgTemp = week.map { it.tempC }.average()
+    val tempsWithData = week.filter { it.tempC != 0 }
+    val avgTemp = if (tempsWithData.isNotEmpty()) tempsWithData.map { it.tempC }.average() else 0.0
 
-    // Rule-based recommendation based on week context.
     val suggestion = remember(week) { buildSuggestion(week) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()) // allow scrolling on smaller screens
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Weekly Insights", style = MaterialTheme.typography.headlineSmall)
 
-        // Summary KPI row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -129,7 +110,6 @@ private fun InsightsContent(week: List<DayInsight>) {
             StatCard("Avg temp", "${avgTemp.roundToInt()}°C", modifier = Modifier.weight(1f))
         }
 
-        // Line chart for mood (1..5)
         ChartCard(title = "Mood trend (1–5)") {
             MoodLineChart(
                 data = week.map { it.mood },
@@ -137,7 +117,6 @@ private fun InsightsContent(week: List<DayInsight>) {
             )
         }
 
-        // Bars for exercise minutes with weather dots overlaid
         ChartCard(title = "Exercise vs Weather") {
             ExerciseBarWithWeather(
                 minutes = week.map { it.minutes },
@@ -146,7 +125,6 @@ private fun InsightsContent(week: List<DayInsight>) {
             )
         }
 
-        // Tip panel (light brand tint)
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = Color(0xFFB39DDB).copy(alpha = 0.12f)
@@ -160,14 +138,10 @@ private fun InsightsContent(week: List<DayInsight>) {
                 Text(suggestion)
             }
         }
-
         Spacer(Modifier.height(8.dp))
     }
 }
 
-/**
- * Small heuristic that turns weekly context into a single actionable sentence.
- */
 private fun buildSuggestion(week: List<DayInsight>): String {
     val avgTemp = week.map { it.tempC }.average()
     val totalMin = week.sumOf { it.minutes }
@@ -185,11 +159,6 @@ private fun buildSuggestion(week: List<DayInsight>): String {
     }
 }
 
-// ---------- UI pieces ----------
-
-/**
- * Compact statistic tile used at the top of the screen.
- */
 @Composable
 private fun StatCard(
     label: String,
@@ -197,7 +166,7 @@ private fun StatCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier,   // weight is supplied by the caller
+        modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
@@ -211,9 +180,6 @@ private fun StatCard(
     }
 }
 
-/**
- * Generic chart container with a title and fixed plot height.
- */
 @Composable
 private fun ChartCard(title: String, content: @Composable () -> Unit) {
     Card(
@@ -231,13 +197,10 @@ private fun ChartCard(title: String, content: @Composable () -> Unit) {
     }
 }
 
-/**
- * Simple line chart for mood (1..5).
- * Draws Y gridlines, a baseline, points, and a rounded polyline.
- */
 @Composable
 private fun MoodLineChart(data: List<Int>, labels: List<String>) {
-    val minY = 1f
+    // This will ensure that the 0-point data point is plotted on the bottom axis
+    val minY = 0f
     val maxY = 5f
     val points = data.map { it.toFloat() }
 
@@ -249,30 +212,31 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
         val top = 12f
         val bottom = h - 28f
 
-        // Axes
         drawLine(Color.LightGray, Offset(left, top), Offset(left, bottom), 2f)
         drawLine(Color.LightGray, Offset(left, bottom), Offset(right, bottom), 2f)
 
-        // Horizontal gridlines (1..5)
         (1..5).forEach { y ->
             val yy = bottom - (y - minY) / (maxY - minY) * (bottom - top)
             drawLine(Color(0xFFE0E0E0), Offset(left, yy), Offset(right, yy), 1f)
         }
 
-        // X spacing between points
         val stepX = (right - left) / (points.size - 1).coerceAtLeast(1)
 
-        // Connected line + points
         val path = Path()
         points.forEachIndexed { i, v ->
             val x = left + i * stepX
             val y = bottom - (v - minY) / (maxY - minY) * (bottom - top)
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+
+            if (i == 0) {
+                path.moveTo(x, y)
+            } else {
+                path.lineTo(x, y)
+            }
             drawCircle(Color(0xFF7E57C2), radius = 5f, center = Offset(x, y))
         }
+
         drawPath(path, Color(0xFF7E57C2), style = Stroke(width = 4f, cap = StrokeCap.Round))
 
-        // X labels
         val labelStep = stepX
         labels.forEachIndexed { i, s ->
             drawContext.canvas.nativeCanvas.apply {
@@ -291,9 +255,7 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
     }
 }
 
-/**
- * Combined chart: exercise minutes as bars, temperature as dots overlaid.
- */
+
 @Composable
 private fun ExerciseBarWithWeather(
     minutes: List<Int>,
@@ -301,7 +263,7 @@ private fun ExerciseBarWithWeather(
     labels: List<String>,
     barWidth: Dp = 18.dp
 ) {
-    val maxMin = (minutes.maxOrNull() ?: 0).coerceAtLeast(60).toFloat()  // Ensures a visible scale
+    val maxMin = (minutes.maxOrNull() ?: 0).coerceAtLeast(60).toFloat()
     val maxTemp = (temps.maxOrNull() ?: 0).coerceAtLeast(30).toFloat()
 
     Canvas(Modifier.fillMaxSize()) {
@@ -312,7 +274,6 @@ private fun ExerciseBarWithWeather(
         val top = 12f
         val bottom = h - 28f
 
-        // Axes
         drawLine(Color.LightGray, Offset(left, top), Offset(left, bottom), 2f)
         drawLine(Color.LightGray, Offset(left, bottom), Offset(right, bottom), 2f)
 
@@ -323,19 +284,16 @@ private fun ExerciseBarWithWeather(
             val x = left + i * barSpace + barSpace / 2f
             val barTop = bottom - (m / maxMin) * (bottom - top)
 
-            // Exercise bar for day i
             drawRect(
                 color = Color(0xFFB39DDB),
                 topLeft = Offset(x - bw / 2f, barTop),
                 size = androidx.compose.ui.geometry.Size(bw, bottom - barTop)
             )
 
-            // Temperature dot for day i
             val t = temps[i]
             val ty = bottom - (t / maxTemp) * (bottom - top)
             drawCircle(Color(0xFF455A64), radius = 5f, center = Offset(x, ty))
 
-            // X labels under each bar/dot
             drawContext.canvas.nativeCanvas.apply {
                 drawText(
                     labels[i],
@@ -349,7 +307,6 @@ private fun ExerciseBarWithWeather(
                 )
             }
 
-            // Small temperature label above the dot
             drawContext.canvas.nativeCanvas.apply {
                 drawText(
                     "${t}°",
@@ -366,6 +323,5 @@ private fun ExerciseBarWithWeather(
     }
 }
 
-/** Short day-of-week label for chart x-axis (e.g., Mon, Tue). */
 private fun DayOfWeek.shortName(): String =
     getDisplayName(TextStyle.SHORT, Locale.getDefault())

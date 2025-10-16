@@ -263,30 +263,29 @@ fun HistoryScreen(
         )
     }
 
-    // --- 这就是删除确认弹窗的逻辑 ---
-    // 当 deleting 状态不为 null 时，这个 AlertDialog 就会显示
+    // --- Delete confirmation pop-up logic ---
     deleting?.let { entryToDelete ->
         AlertDialog(
-            onDismissRequest = { deleting = null }, // 点击外部或返回键时，关闭弹窗
+            onDismissRequest = { deleting = null },
             title = { Text("Delete Log?") },
             text = { Text("Are you sure you want to permanently delete the log for ${formatDate(entryToDelete.dateMillis)}?") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteLog(entryToDelete.id) // 调用 ViewModel 删除数据库记录
-                        deleting = null // 关闭弹窗
+                        viewModel.deleteLog(entryToDelete.id)
+                        deleting = null
                     }
                 ) {
-                    Text("Delete") // 确认按钮
+                    Text("Delete")
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = {
-                        deleting = null // 只关闭弹窗，不做任何操作
+                        deleting = null
                     }
                 ) {
-                    Text("Cancel") // 取消按钮
+                    Text("Cancel")
                 }
             }
         )
