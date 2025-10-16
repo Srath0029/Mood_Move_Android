@@ -41,6 +41,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.AlertDialog
+
 /**
  * LogScreen
  *
@@ -116,6 +118,19 @@ fun LogScreen() {
     val moodError = showErrors && selectedMood == null
     val intensityError = showErrors && selectedIntensity == null
 
+    // Used to control the display status of the submit success dialog box
+    var showSuccessDialog by remember { mutableStateOf(false) }
+
+    // Clear the filled content after successful submission
+    fun resetForm() {
+        selectedDateMillis = null
+        selectedType = ""
+        selectedDuration = ""
+        selectedMood = null
+        selectedIntensity = null
+        showErrors = false
+    }
+
     // Submit handler: toggles validation and shows snackbar if all required fields are set.
     fun submit() {
         showErrors = true
@@ -128,7 +143,7 @@ fun LogScreen() {
 
         if (!hasError) {
             // TODO: persist to Room; potentially trigger insights/notifications afterwards.
-            scope.launch { snackbarHostState.showSnackbar("Log saved") }
+            showSuccessDialog = true
         }
     }
 
@@ -337,6 +352,27 @@ fun LogScreen() {
             ) { Text("Save log") }
 
             Spacer(Modifier.height(12.dp))
+
+            if (showSuccessDialog) {
+                AlertDialog(
+                    onDismissRequest = {
+                        showSuccessDialog = false
+                        resetForm()
+                    },
+                    title = { Text("Congratulations") },
+                    text = { Text("Saved successfully") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showSuccessDialog = false
+                                resetForm()
+                            }
+                        ) {
+                            Text("OK")
+                        }
+                    }
+                )
+            }
         }
     }
 }
