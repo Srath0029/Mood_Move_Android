@@ -5,10 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,29 +21,43 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.time.LocalTime
+import androidx.compose.ui.platform.LocalContext
+import android.app.TimePickerDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.TextFieldDefaults
+
+
+
 
 /** Model of a single historical log item shown in the list. */
 data class LogEntry(
-    val id: Long,
+    val id: String,
     val dateMillis: Long,
-    val mood: Int,       // 1..5 scale (Very sad .. Very happy)
-    val type: String,    // Activity type (Walk / Run / Cycling / ...)
-    val minutes: Int     // Activity duration in minutes
+    val mood: Int,
+    val type: String,
+    val minutes: Int,
+    val startTime: String,
+    val endTime: String
 )
 
 /** Sorting options for the history list. */
@@ -51,41 +67,64 @@ private enum class SortOption(val label: String) {
     DURATION("Longest")
 }
 
+private val activityTypes = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
+
+@OptIn(ExperimentalMaterial3Api::class)
+private object NotInTheFutureSelectableDates : SelectableDates {
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+        return utcTimeMillis <= Instant.now().toEpochMilli()
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+private class ToDateSelectableDates(private val fromMillis: Long?) : SelectableDates {
+    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+        if (fromMillis == null) {
+            return false
+        }
+        val isNotInFuture = NotInTheFutureSelectableDates.isSelectableDate(utcTimeMillis)
+        val isAfterOrOnFrom = utcTimeMillis >= fromMillis
+        return isNotInFuture && isAfterOrOnFrom
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
-    onEdit: (LogEntry) -> Unit = {},
+    viewModel: HistoryViewModel = viewModel(),
     onView: (LogEntry) -> Unit = {}
 ) {
-    // Demo list kept in memory (replace with Room in the future).
-    val initial = remember { mutableStateListOf<LogEntry>().apply { addAll(sampleLogs()) } }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Search and filter state.
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(SortOption.NEWEST) }
-
-    // Date-range pickers (From / To).
     var fromOpen by remember { mutableStateOf(false) }
     var toOpen by remember { mutableStateOf(false) }
     var fromMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     var toMillis by rememberSaveable { mutableStateOf<Long?>(null) }
-    val fromState = rememberDatePickerState(initialSelectedDateMillis = fromMillis)
-    val toState = rememberDatePickerState(initialSelectedDateMillis = toMillis)
-
-    // Dialog state for view and delete confirmations.
     var viewing by remember { mutableStateOf<LogEntry?>(null) }
     var deleting by remember { mutableStateOf<LogEntry?>(null) }
+    var editing by remember { mutableStateOf<LogEntry?>(null) }
 
-    // Helper to format epoch millis to yyyy-MM-dd.
+    val fromState = rememberDatePickerState(
+        initialSelectedDateMillis = fromMillis,
+        selectableDates = NotInTheFutureSelectableDates
+    )
+
+    val toState = rememberDatePickerState(
+        initialSelectedDateMillis = toMillis,
+        selectableDates = remember(fromMillis) { ToDateSelectableDates(fromMillis) }
+    )
+
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDate(ms: Long?): String =
         ms?.let {
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
         } ?: "Any"
 
-    // Apply query filter, date-range filter, and sort order.
-    val filteredSorted = remember(query, fromMillis, toMillis, sort, initial) {
-        initial
+    val filteredSorted = remember(query, fromMillis, toMillis, sort, uiState.logs) {
+        uiState.logs
             .asSequence()
             .filter { e ->
                 val matchesQuery =
@@ -106,7 +145,6 @@ fun HistoryScreen(
             .toList()
     }
 
-    // Screen header, search box, and filter toolbar.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -117,7 +155,6 @@ fun HistoryScreen(
         Text("History", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(12.dp))
 
-        // Free-text search by activity type or date string.
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -127,38 +164,26 @@ fun HistoryScreen(
         )
 
         Spacer(Modifier.height(12.dp))
-
-        // Keep all filter controls equal height for visual consistency.
         val controlHeight = 48.dp
-
-        // Filters row: From / To / Sort (each uses weight(1f) to be same width).
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // From date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("From", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { fromOpen = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(controlHeight)
+                    modifier = Modifier.fillMaxWidth().height(controlHeight)
                 ) { Text(formatDate(fromMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-
-            // To date picker trigger.
             Column(Modifier.weight(1f)) {
                 Text("To", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
                 OutlinedButton(
                     onClick = { toOpen = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(controlHeight)
+                    enabled = fromMillis != null,
+                    modifier = Modifier.fillMaxWidth().height(controlHeight)
                 ) { Text(formatDate(toMillis), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
-
-            // Sort dropdown button.
             SortMenu(
                 current = sort,
                 onChange = { sort = it },
@@ -166,33 +191,42 @@ fun HistoryScreen(
                 height = controlHeight
             )
         }
-
         Spacer(Modifier.height(12.dp))
-
-        // Scrollable list of entries.
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(filteredSorted, key = { it.id }) { entry ->
-                HistoryRow(
-                    entry = entry,
-                    onView = { viewing = it; onView(it) },
-                    onEdit = onEdit,
-                    onDelete = { deleting = it }
-                )
+        if (uiState.isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-            item { Spacer(Modifier.height(8.dp)) }
+        } else if (filteredSorted.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (uiState.logs.isEmpty()) "No logs yet." else "No logs match your filters.")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(filteredSorted, key = { it.id }) { entry ->
+                    HistoryRow(
+                        entry = entry,
+                        onView = { viewing = it },
+                        onEdit = { editing = it },
+                        onDelete = { deleting = it }
+                    )
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
         }
     }
 
-    // From date dialog.
     if (fromOpen) {
         DatePickerDialog(
             onDismissRequest = { fromOpen = false },
             confirmButton = {
                 TextButton(onClick = {
                     fromMillis = fromState.selectedDateMillis
+                    if (toMillis != null && fromMillis != null && fromMillis!! > toMillis!!) {
+                        toMillis = null
+                    }
                     fromOpen = false
                 }) { Text("OK") }
             },
@@ -200,7 +234,6 @@ fun HistoryScreen(
         ) { DatePicker(state = fromState, showModeToggle = true) }
     }
 
-    // To date dialog.
     if (toOpen) {
         DatePickerDialog(
             onDismissRequest = { toOpen = false },
@@ -214,13 +247,10 @@ fun HistoryScreen(
         ) { DatePicker(state = toState, showModeToggle = true) }
     }
 
-    // View-details dialog for a selected entry.
     viewing?.let { e ->
         AlertDialog(
             onDismissRequest = { viewing = null },
-            confirmButton = {
-                TextButton(onClick = { viewing = null }) { Text("Close") }
-            },
+            confirmButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
             title = { Text("Log details") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -233,28 +263,284 @@ fun HistoryScreen(
         )
     }
 
-    // Delete confirmation dialog for a selected entry.
-    deleting?.let { e ->
+    // --- Delete confirmation pop-up logic ---
+    deleting?.let { entryToDelete ->
         AlertDialog(
             onDismissRequest = { deleting = null },
+            title = { Text("Delete Log?") },
+            text = { Text("Are you sure you want to permanently delete the log for ${formatDate(entryToDelete.dateMillis)}?") },
             confirmButton = {
-                TextButton(onClick = {
-                    val idx = initial.indexOfFirst { it.id == e.id }
-                    if (idx >= 0) initial.removeAt(idx)
-                    deleting = null
-                }) { Text("Delete") }
+                TextButton(
+                    onClick = {
+                        viewModel.deleteLog(entryToDelete.id)
+                        deleting = null
+                    }
+                ) {
+                    Text("Delete")
+                }
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
-            title = { Text("Delete log?") },
-            text = { Text("This will permanently remove ${formatDate(e.dateMillis)} (${e.type}, ${e.minutes} min).") }
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deleting = null
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    editing?.let { entryToEdit ->
+        EditLogDialog(
+            logEntry = entryToEdit,
+            onDismiss = { editing = null },
+            onSave = { date, mood, type, start, end ->
+                viewModel.updateLog(entryToEdit.id, date, mood, type, start, end)
+                editing = null
+            }
         )
     }
 }
 
-/**
- * Card row for a single log entry with date, mood badge, activity summary,
- * and quick actions (View/Edit/Delete).
- */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditLogDialog(
+    logEntry: LogEntry,
+    onDismiss: () -> Unit,
+    onSave: (date: Long, mood: Int, type: String, start: String, end: String) -> Unit
+) {
+    var currentType by remember { mutableStateOf(logEntry.type) }
+    var currentMood by remember { mutableStateOf(logEntry.mood.toString()) }
+    var currentDateMillis by remember { mutableStateOf(logEntry.dateMillis) }
+    var currentStartTime by remember { mutableStateOf(logEntry.startTime) }
+    var currentEndTime by remember { mutableStateOf(logEntry.endTime) }
+
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
+    var activityMenuExpanded by remember { mutableStateOf(false) }
+    val isEndTimeEnabled = currentStartTime.isNotBlank()
+
+    val isMoodValid = currentMood.toIntOrNull() in 1..5
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val areTimesValid = try {
+        val start = LocalTime.parse(currentStartTime, timeFormatter)
+        val end = LocalTime.parse(currentEndTime, timeFormatter)
+        !end.isBefore(start)
+    } catch (e: Exception) {
+        false
+    }
+    val isSaveEnabled = currentType.isNotBlank() && isMoodValid && areTimesValid
+
+    val editDatePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = currentDateMillis,
+        selectableDates = NotInTheFutureSelectableDates
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit log") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box {
+                    OutlinedTextField(
+                        value = currentType,
+                        onValueChange = {},
+                        label = { Text("Activity type") },
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { activityMenuExpanded = true },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = "Select activity",
+                                modifier = Modifier.clickable { activityMenuExpanded = true }
+                            )
+                        }
+                    )
+                    DropdownMenu(
+                        expanded = activityMenuExpanded,
+                        onDismissRequest = { activityMenuExpanded = false }
+                    ) {
+                        activityTypes.forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(type) },
+                                onClick = {
+                                    currentType = type
+                                    activityMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showStartTimePicker = true }
+                    ) {
+                        OutlinedTextField(
+                            value = currentStartTime,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Start time") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false,
+                            colors = TextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledContainerColor = Color.Transparent,
+                                disabledIndicatorColor = MaterialTheme.colorScheme.outline,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(enabled = isEndTimeEnabled) { showEndTimePicker = true }
+                    ) {
+                        OutlinedTextField(
+                            value = currentEndTime,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("End time") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false,
+                            colors = TextFieldDefaults.colors(
+                                disabledTextColor = if (isEndTimeEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                disabledContainerColor = Color.Transparent,
+                                disabledIndicatorColor = if (isEndTimeEnabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                                disabledLabelColor = if (isEndTimeEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                            )
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = currentMood,
+                    onValueChange = { if (it.length <= 1) currentMood = it.filter { c -> c.isDigit() } },
+                    label = { Text("Mood (1..5)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    isError = !isMoodValid && currentMood.isNotEmpty()
+                )
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Date: ${formatDateOnly(currentDateMillis)}")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(currentDateMillis, currentMood.toInt(), currentType, currentStartTime, currentEndTime) },
+                enabled = isSaveEnabled
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    editDatePickerState.selectedDateMillis?.let { currentDateMillis = it }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } }
+        ) { DatePicker(state = editDatePickerState, showModeToggle = true) }
+    }
+
+    if (showStartTimePicker) {
+        TimePickerDialog(
+            initialTime = currentStartTime,
+            onDismiss = { showStartTimePicker = false },
+            onTimeSelected = { newTime ->
+                currentStartTime = newTime
+                try {
+                    val startTime = LocalTime.parse(newTime, timeFormatter)
+                    val endTime = LocalTime.parse(currentEndTime, timeFormatter)
+                    if (startTime.isAfter(endTime)) {
+                        currentEndTime = newTime
+                    }
+                } catch (e: Exception) {
+                    currentEndTime = newTime
+                }
+                showStartTimePicker = false
+            }
+        )
+    }
+
+    if (showEndTimePicker) {
+        TimePickerDialog(
+            initialTime = currentEndTime,
+            onDismiss = { showEndTimePicker = false },
+            onTimeSelected = { newTime ->
+                try {
+                    val startTime = LocalTime.parse(currentStartTime, timeFormatter)
+                    var endTime = LocalTime.parse(newTime, timeFormatter)
+                    val maxEndTime = startTime.plusHours(1)
+
+                    if (endTime.isBefore(startTime)) {
+                        endTime = startTime
+                    }
+                    if (endTime.isAfter(maxEndTime)) {
+                        endTime = maxEndTime
+                    }
+                    currentEndTime = endTime.format(timeFormatter)
+                } catch (e: Exception) {
+                    currentEndTime = newTime
+                }
+                showEndTimePicker = false
+            }
+        )
+    }
+}
+
+
+@Composable
+private fun TimePickerDialog(
+    initialTime: String,
+    onDismiss: () -> Unit,
+    onTimeSelected: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val initialLocalTime = try {
+        LocalTime.parse(initialTime, formatter)
+    } catch (e: Exception) {
+        LocalTime.now()
+    }
+
+    val timePickerDialog = remember {
+        TimePickerDialog(
+            context,
+            { _, hourOfDay, minute ->
+                val selectedTime = LocalTime.of(hourOfDay, minute).format(formatter)
+                onTimeSelected(selectedTime)
+            },
+            initialLocalTime.hour,
+            initialLocalTime.minute,
+            true
+        ).apply {
+            setOnDismissListener { onDismiss() }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        timePickerDialog.show()
+    }
+}
+
+
 @Composable
 private fun HistoryRow(
     entry: LogEntry,
@@ -294,7 +580,6 @@ private fun HistoryRow(
     }
 }
 
-/** Small colored label showing the mood category based on the 1..5 mood score. */
 @Composable
 private fun MoodBadge(mood: Int) {
     val label = when (mood) {
@@ -321,7 +606,6 @@ private fun MoodBadge(mood: Int) {
     )
 }
 
-/** Sort menu button + dropdown list of [SortOption] choices. */
 @Composable
 private fun SortMenu(
     current: SortOption,
@@ -350,28 +634,8 @@ private fun SortMenu(
     }
 }
 
-// --- Helpers & sample data ---
-
-/** Format an epoch millis value to a short yyyy-MM-dd string. */
-private fun formatDateOnly(ms: Long): String =
-    Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+private fun formatDateOnly(ms: Long?): String {
+    if (ms == null) return "Any"
+    return Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
         .format(DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()))
-
-/** Generate simple demo logs for preview/testing the history UI. */
-private fun sampleLogs(): List<LogEntry> {
-    val today = LocalDate.now()
-    val types = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
-    val moods = listOf(3, 4, 2, 5, 3, 4, 1, 5, 2, 3)
-    val mins = listOf(15, 30, 10, 45, 25, 35, 20, 50, 12, 40)
-
-    return (0 until 10).map { i ->
-        val date = today.minusDays(i.toLong()).atStartOfDay(ZoneId.systemDefault()).toInstant()
-        LogEntry(
-            id = i.toLong(),
-            dateMillis = date.toEpochMilli(),
-            mood = moods[i % moods.size],
-            type = types[i % types.size],
-            minutes = mins[i % mins.size]
-        )
-    }
 }
