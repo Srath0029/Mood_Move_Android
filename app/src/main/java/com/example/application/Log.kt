@@ -1,80 +1,60 @@
 package com.example.application
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.util.Log
-import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.google.android.gms.location.LocationServices
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.GeoPoint
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.engine.android.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.serialization.Serializable
 import java.time.Instant
-import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material3.Icon
-import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SelectableDates
-import androidx.compose.material3.AlertDialog
+import kotlinx.serialization.json.Json
 
-/**
- * LogScreen
- *
- * Daily logging form that captures:
- *  - Date (DatePicker)
- *  - Exercise type (dropdown)
- *  - Duration (dropdown)
- *  - Mood (radio group)
- *  - Intensity (radio group)
- *
- *  Database
- *   - email
- *   - Date
- *   - Exercise type
- *   - Duration
- *   - Mood （very happy 5）
- *   - Intensity
- *   - Location
- *   - Temp
- * Includes early validation with inline error messages and a snackbar on success.
- */
+private enum class TimePickerTarget { START, END }
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogScreen() {
-    // Snackbar host for lightweight success feedback.
-    val snackbarHostState = remember { SnackbarHostState() }
+    // --- State and context ---
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Global flag to show validation errors (set after the first submit attempt).
     var showErrors by rememberSaveable { mutableStateOf(false) }
+    var showSuccessDialog by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
-    // Date state: initialize as "not selected" so required validation can trigger.
+    // --- Form status ---
     var selectedDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     var openDatePicker by remember { mutableStateOf(false) }
     val dateState = rememberDatePickerState(
@@ -85,75 +65,159 @@ fun LogScreen() {
             }
         }
     )
-
-    // Exercise type dropdown state.
     val exerciseTypes = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
     var typeExpanded by remember { mutableStateOf(false) }
     var selectedType by rememberSaveable { mutableStateOf("") }
-
-    // Duration dropdown state.
-    val durations = listOf("10 min", "20 min", "30 min", "45 min", "60 min")
-    var durationExpanded by remember { mutableStateOf(false) }
-    var selectedDuration by rememberSaveable { mutableStateOf("") }
-
-    // Mood radio group state.
+    var selectedStartTime by rememberSaveable { mutableStateOf<LocalTime?>(null) }
+    var selectedEndTime by rememberSaveable { mutableStateOf<LocalTime?>(null) }
+    var timePickerTarget by remember { mutableStateOf<TimePickerTarget?>(null) }
     val moodOptions = listOf("Very happy", "Happy", "Normal", "Sad", "Very sad")
     var selectedMood by rememberSaveable { mutableStateOf<String?>(null) }
-
-    // Intensity radio group state.
     val intensityOptions = listOf("High", "Medium", "Low")
     var selectedIntensity by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // Date formatter used to render the selected day in the text field.
+    // --- Location service client ---
+    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+    // --- Permission request launcher ---
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            if (permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false) ||
+                permissions.getOrDefault(Manifest.permission.ACCESS_COARSE_LOCATION, false)
+            ) {
+                // Permission is granted, prompt the user to click the submit button again
+                scope.launch { snackbarHostState.showSnackbar("Permission granted, please submit again.") }
+            } else {
+                // Permission denied
+                scope.launch { snackbarHostState.showSnackbar("Requires location permission to record.") }
+            }
+        }
+    )
+
+    // --- Logical function ---
     val formatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDate(millis: Long?): String =
         millis?.let { ms ->
             Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate().format(formatter)
         } ?: "Select date"
 
-    // Field-level error flags for inline validation messages.
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    fun formatTime(time: LocalTime?): String = time?.format(timeFormatter) ?: "Select time"
+
+    // --- Field level error status flag ---
     val dateError = showErrors && selectedDateMillis == null
     val typeError = showErrors && selectedType.isBlank()
-    val durationError = showErrors && selectedDuration.isBlank()
     val moodError = showErrors && selectedMood == null
     val intensityError = showErrors && selectedIntensity == null
+    val startTimeError = showErrors && selectedStartTime == null
 
-    // Used to control the display status of the submit success dialog box
-    var showSuccessDialog by remember { mutableStateOf(false) }
+    // These two local variables are to solve Kotlin's smart conversion problem
+    val localStartTime = selectedStartTime
+    val localEndTime = selectedEndTime
 
-    // Clear the filled content after successful submission
+    val endTimeError = showErrors && (
+            localEndTime == null ||
+                    (localStartTime != null && !localEndTime.isAfter(localStartTime)) ||
+                    (localStartTime != null && localEndTime.isAfter(localStartTime.plusHours(1)))
+            )
+
+    fun moodToScore(mood: String?): Int {
+        return when (mood) {
+            "Very happy" -> 5
+            "Happy" -> 4
+            "Normal" -> 3
+            "Sad" -> 2
+            "Very sad" -> 1
+            else -> 0
+        }
+    }
     fun resetForm() {
         selectedDateMillis = null
         selectedType = ""
-        selectedDuration = ""
+        selectedStartTime = null
+        selectedEndTime = null
         selectedMood = null
         selectedIntensity = null
         showErrors = false
     }
 
-    // Submit handler: toggles validation and shows snackbar if all required fields are set.
     fun submit() {
-        showErrors = true
-        val hasError =
-            selectedDateMillis == null ||
-                    selectedType.isBlank() ||
-                    selectedDuration.isBlank() ||
-                    selectedMood == null ||
-                    selectedIntensity == null
+        scope.launch {
+            // 1. Form Validation
+            showErrors = true
+            val localStartTime = selectedStartTime
+            val localEndTime = selectedEndTime
+            val hasFormError = selectedDateMillis == null || selectedType.isBlank() ||
+                    localStartTime == null || localEndTime == null || selectedMood == null ||
+                    selectedIntensity == null || (localStartTime != null && !localEndTime.isAfter(localStartTime)) ||
+                    (localStartTime != null && localEndTime.isAfter(localStartTime.plusHours(1)))
+            if (hasFormError) return@launch
 
-        if (!hasError) {
-            // TODO: persist to Room; potentially trigger insights/notifications afterwards.
-            showSuccessDialog = true
+            isSubmitting = true
+
+            try {
+                // 2. Check and request location permission
+                if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    locationPermissionLauncher.launch(arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ))
+                    isSubmitting = false
+                    return@launch
+                }
+
+                // 3. Get the location
+                val location = fusedLocationClient.lastLocation.await()
+                val geoPoint = if (location != null) GeoPoint(location.latitude, location.longitude) else null
+
+                // 4. Get temperature
+                val temperature = if (location != null) {
+                    getTemperature(latitude = location.latitude, longitude = location.longitude)
+                } else {
+                    null
+                }
+
+                // 5. Get the current user's Email
+                val currentUser = Firebase.auth.currentUser
+                val userEmail = currentUser?.email
+                val userId = currentUser?.uid
+
+                // 6. Construct data object
+                val logEntry = ExerciseLog(
+                    userEmail = userEmail,
+                    userId = userId,
+                    dateMillis = selectedDateMillis,
+                    startTime = selectedStartTime?.format(timeFormatter),
+                    endTime = selectedEndTime?.format(timeFormatter),
+                    exerciseType = selectedType,
+                    moodScore = moodToScore(selectedMood),
+                    intensity = selectedIntensity ?: "",
+                    location = geoPoint,
+                    temperatureCelsius = temperature
+                )
+
+                // 7. Save to Firestore
+                Firebase.firestore.collection("logs").add(logEntry).await()
+
+                // 8. Display a pop-up window after success
+                showSuccessDialog = true
+
+            } catch (e: Exception) {
+                Log.e("SubmitError", "Failed to submit log", e)
+                snackbarHostState.showSnackbar("error: ${e.message}")
+            } finally {
+                isSubmitting = false
+            }
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
-    ) { innerPadding ->
+    // --- UI ---
+    Scaffold(snackbarHost = { SnackbarHost(hostState = snackbarHostState) }) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()) // Allow scroll on smaller screens/with keyboard.
+                .verticalScroll(rememberScrollState())
                 .padding(innerPadding)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -165,7 +229,6 @@ fun LogScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        Log.d("Solution", "Box wrapper clicked, opening date picker...")
                         openDatePicker = true
                     }
             ) {
@@ -216,7 +279,7 @@ fun LogScreen() {
                 ) {
                     DatePicker(state = dateState,
                         showModeToggle = true
-                        )
+                    )
                 }
             }
 
@@ -260,43 +323,127 @@ fun LogScreen() {
                 )
             }
 
-            /* ---------------- Duration ---------------- */
-            ExposedDropdownMenuBox(
-                expanded = durationExpanded,
-                onExpandedChange = { durationExpanded = !durationExpanded }
-            ) {
-                OutlinedTextField(
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    readOnly = true,
-                    value = selectedDuration,
-                    onValueChange = {},
-                    label = { Text("Duration") },
-                    trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = durationExpanded)
-                    },
-                    isError = durationError,
-                    placeholder = { Text("Please choose") }
-                )
-                DropdownMenu(
-                    expanded = durationExpanded,
-                    onDismissRequest = { durationExpanded = false }
+            /* ---------------- Start and End Time ---------------- */
+            val isEndTimeEnabled = selectedStartTime != null
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { timePickerTarget = TimePickerTarget.START }
                 ) {
-                    durations.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option) },
-                            onClick = {
-                                selectedDuration = option
-                                durationExpanded = false
-                            }
+                    OutlinedTextField(
+                        value = formatTime(selectedStartTime),
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("Start time") },
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = startTimeError,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledBorderColor = if (startTimeError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
+                    )
+                }
+
+                // End Time Box
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = isEndTimeEnabled) {
+                            timePickerTarget = TimePickerTarget.END
+                        }
+                ) {
+                    OutlinedTextField(
+                        value = formatTime(selectedEndTime),
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = false,
+                        label = { Text("End time") },
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = endTimeError,
+                        colors = if (isEndTimeEnabled) {
+                            OutlinedTextFieldDefaults.colors(
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledBorderColor = if (endTimeError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            OutlinedTextFieldDefaults.colors()
+                        }
+                    )
                 }
             }
-            if (durationError) {
+
+            if (startTimeError) {
                 Text(
-                    "Please choose a duration",
+                    "Please select a start time",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
+                )
+            } else if (endTimeError) {
+                Text(
+                    "End time must be after start time and within 1 hour",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            // --- Time Picker Dialog Logic ---
+            if (timePickerTarget != null) {
+                val isStartTimePicker = timePickerTarget == TimePickerTarget.START
+                val timeState = rememberTimePickerState(
+                    initialHour = if (isStartTimePicker) selectedStartTime?.hour ?: LocalTime.now().hour else selectedEndTime?.hour ?: LocalTime.now().hour,
+                    initialMinute = if (isStartTimePicker) selectedStartTime?.minute ?: LocalTime.now().minute else selectedEndTime?.minute ?: LocalTime.now().minute,
+                    is24Hour = true
+                )
+                var showTimePickerError by remember { mutableStateOf(false) }
+
+                AlertDialog(
+                    onDismissRequest = { timePickerTarget = null },
+                    title = {
+                        Text(if (isStartTimePicker) "Select Start Time" else "Select End Time")
+                    },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            TimePicker(state = timeState)
+
+                            if (showTimePickerError) {
+                                Text(
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    text = "End time must be after start time and within 1 hour",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            val selectedTime = LocalTime.of(timeState.hour, timeState.minute)
+                            if (isStartTimePicker) {
+                                selectedStartTime = selectedTime
+                                timePickerTarget = null
+                            } else {
+                                val startTime = selectedStartTime
+                                if (startTime != null) {
+                                    val isValid = selectedTime.isAfter(startTime) && !selectedTime.isAfter(startTime.plusHours(1))
+                                    if (isValid) {
+                                        showTimePickerError = false
+                                        selectedEndTime = selectedTime
+                                        timePickerTarget = null
+                                    } else {
+                                        showTimePickerError = true
+                                    }
+                                }
+                            }
+                        }) { Text("OK") }
+                    },
+                    dismissButton = {
+                        Button(onClick = { timePickerTarget = null }) { Text("Cancel") }
+                    }
                 )
             }
 
@@ -344,14 +491,24 @@ fun LogScreen() {
                 )
             }
 
+
             /* ---------------- Submit ---------------- */
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { submit() },
+                enabled = !isSubmitting,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Save log") }
-
-            Spacer(Modifier.height(12.dp))
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Save log")
+                }
+            }
 
             if (showSuccessDialog) {
                 AlertDialog(
@@ -378,3 +535,31 @@ fun LogScreen() {
 }
 
 
+// --- Weather API call function ---
+
+private val ktorClient = HttpClient(Android) {
+    install(ContentNegotiation) {
+        json(Json {
+            ignoreUnknownKeys = true
+        })
+    }
+}
+
+@Serializable
+private data class WeatherResponse(val main: Main)
+
+@Serializable
+private data class Main(val temp: Double)
+
+private suspend fun getTemperature(latitude: Double, longitude: Double): Double? {
+    val apiKey = "197d431fa550c96a045c38749be83926"
+    val url = "https://api.openweathermap.org/data/2.5/weather?lat=$latitude&lon=$longitude&appid=$apiKey&units=metric"
+
+    return try {
+        val response: WeatherResponse = ktorClient.get(url).body()
+        response.main.temp
+    } catch (e: Exception) {
+        Log.e("WeatherApi", "Failed to obtain temperature", e)
+        null
+    }
+}
