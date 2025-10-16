@@ -5,6 +5,15 @@
     <!-- Networking for Firebase/Auth/Firestore -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Android 13+ runtime notification permission -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 12+ app-op to allow exact alarms (for medication reminders) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Networking for Firebase/Auth/Firestore -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- location-->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
