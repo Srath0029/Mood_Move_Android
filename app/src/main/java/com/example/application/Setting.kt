@@ -81,7 +81,6 @@ fun SettingsScreen(
 
         if (isFineLocationGranted || isCoarseLocationGranted) {
             scope.launch { snack.showSnackbar("Location permission granted. You can now enable background updates.") }
-            // 可以在这里再次尝试启动 Worker，如果用户是刚刚授权的话
         } else {
             scope.launch { snack.showSnackbar("Location permission denied. Background updates cannot be enabled.") }
         }
@@ -236,8 +235,7 @@ fun SettingsScreen(
                     if (!loggedIn) return@SettingSwitchRow
 
                     if (checked) {
-                        // --- 修改：用户想要开启任务 ---
-                        // 1. 检查权限
+                        // 1. Check permissions
                         val hasFineLocationPermission = ContextCompat.checkSelfPermission(
                             context, Manifest.permission.ACCESS_FINE_LOCATION
                         ) == PackageManager.PERMISSION_GRANTED
@@ -247,12 +245,10 @@ fun SettingsScreen(
                         ) == PackageManager.PERMISSION_GRANTED
 
                         if (hasFineLocationPermission || hasCoarseLocationPermission) {
-                            // 2. 如果已有权限，则更新状态并启动 Worker
                             bgUpdates = true
                             ContextIngestWorker.enqueue(context)
                             scope.launch { snack.showSnackbar("Background updates enabled.") }
                         } else {
-                            // 3. 如果没有权限，则请求权限
                             locationPermissionLauncher.launch(
                                 arrayOf(
                                     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -261,7 +257,7 @@ fun SettingsScreen(
                             )
                         }
                     } else {
-                        // --- 用户想要关闭任务 ---
+                        // --- User wants to close the task ---
                         bgUpdates = false
                         ContextIngestWorker.cancel(context)
                         scope.launch { snack.showSnackbar("Background updates disabled.") }
