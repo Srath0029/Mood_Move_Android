@@ -38,6 +38,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
 
 private enum class TimePickerTarget { START, END }
 
@@ -61,7 +62,9 @@ fun LogScreen() {
         initialSelectedDateMillis = selectedDateMillis,
         selectableDates = object : SelectableDates {
             override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                return utcTimeMillis <= System.currentTimeMillis()
+                val today = Instant.now().atZone(ZoneId.systemDefault()).toLocalDate()
+                val dateToCheck = Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+                return !dateToCheck.isAfter(today)
             }
         }
     )
@@ -172,8 +175,13 @@ fun LogScreen() {
                 val geoPoint = if (location != null) GeoPoint(location.latitude, location.longitude) else null
 
                 // 4. Get temperature
-                val temperature = if (location != null) {
-                    getTemperature(latitude = location.latitude, longitude = location.longitude)
+                val temperature = if (location != null && selectedDateMillis != null && selectedStartTime != null) {
+                    getTemperature(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        dateMillis = selectedDateMillis!!,
+                        startTime = selectedStartTime!!
+                    )
                 } else {
                     null
                 }
@@ -399,7 +407,9 @@ fun LogScreen() {
                     initialMinute = if (isStartTimePicker) selectedStartTime?.minute ?: LocalTime.now().minute else selectedEndTime?.minute ?: LocalTime.now().minute,
                     is24Hour = true
                 )
+                // 1. 修改状态变量，使其能保存具体的错误信息
                 var showTimePickerError by remember { mutableStateOf(false) }
+                var timePickerErrorMessage by remember { mutableStateOf("") }
 
                 AlertDialog(
                     onDismissRequest = { timePickerTarget = null },
@@ -410,10 +420,11 @@ fun LogScreen() {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             TimePicker(state = timeState)
 
+                            // 3. 更新UI以显示错误信息
                             if (showTimePickerError) {
                                 Text(
                                     modifier = Modifier.padding(top = 8.dp),
-                                    text = "End time must be after start time and within 1 hour",
+                                    text = timePickerErrorMessage,
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -423,9 +434,21 @@ fun LogScreen() {
                     confirmButton = {
                         Button(onClick = {
                             val selectedTime = LocalTime.of(timeState.hour, timeState.minute)
+
                             if (isStartTimePicker) {
-                                selectedStartTime = selectedTime
-                                timePickerTarget = null
+                                val today = LocalDate.now(ZoneId.systemDefault())
+                                val selectedDate = selectedDateMillis?.let {
+                                    Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+                                }
+
+                                if (selectedDate == today && selectedTime.isAfter(LocalTime.now(ZoneId.systemDefault()))) {
+                                    timePickerErrorMessage = "Start time cannot be in the future for today's date."
+                                    showTimePickerError = true
+                                } else {
+                                    showTimePickerError = false
+                                    selectedStartTime = selectedTime
+                                    timePickerTarget = null
+                                }
                             } else {
                                 val startTime = selectedStartTime
                                 if (startTime != null) {
@@ -435,6 +458,7 @@ fun LogScreen() {
                                         selectedEndTime = selectedTime
                                         timePickerTarget = null
                                     } else {
+                                        timePickerErrorMessage = "End time must be after start time and within 1 hour."
                                         showTimePickerError = true
                                     }
                                 }
@@ -546,20 +570,28 @@ private val ktorClient = HttpClient(Android) {
 }
 
 @Serializable
-private data class WeatherResponse(val main: Main)
+private data class HistoricalWeatherResponse(val data: List<HistoricalData>)
 
 @Serializable
-private data class Main(val temp: Double)
+private data class HistoricalData(val temp: Double)
+private suspend fun getTemperature(
+    latitude: Double,
+    longitude: Double,
+    dateMillis: Long,
+    startTime: LocalTime
+): Double? {
+    val selectedDate = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+    val selectedDateTime = selectedDate.atTime(startTime)
+    val timestamp = selectedDateTime.atZone(ZoneId.systemDefault()).toEpochSecond()
 
-private suspend fun getTemperature(latitude: Double, longitude: Double): Double? {
     val apiKey = "197d431fa550c96a045c38749be83926"
-    val url = "https://api.openweathermap.org/data/2.5/weather?lat=$latitude&lon=$longitude&appid=$apiKey&units=metric"
+    val url = "https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=$latitude&lon=$longitude&dt=$timestamp&appid=$apiKey&units=metric"
 
     return try {
-        val response: WeatherResponse = ktorClient.get(url).body()
-        response.main.temp
+        val response: HistoricalWeatherResponse = ktorClient.get(url).body()
+        response.data.firstOrNull()?.temp
     } catch (e: Exception) {
-        Log.e("WeatherApi", "Failed to obtain temperature", e)
+        Log.e("WeatherApi", "Failed to obtain historical temperature", e)
         null
     }
 }
