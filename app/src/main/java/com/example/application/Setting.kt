@@ -30,6 +30,13 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /* ---------- Simple TimePicker button using platform dialog ---------- */
+/**
+ * Small wrapper that shows the platform TimePicker dialog and returns the picked time.
+ *
+ * Why a dialog instead of inline pickers:
+ * - Lightweight, consistent UX with system time selection.
+ * - Keeps Settings screen compact.
+ */
 @Composable
 private fun TimePickerButton(
     label: String,
@@ -52,6 +59,13 @@ private fun TimePickerButton(
 }
 
 /* ---------- Profile data ---------- */
+/**
+ * Minimal profile snapshot for display in Settings.
+ *
+ * NOTE:
+ * - Treat DOB and body metrics as sensitive. Do not share publicly or to other users
+ *   without explicit consent and proper sanitization.
+ */
 data class UserProfile(
     val name: String = "",
     val age: Int? = null,
@@ -62,6 +76,23 @@ data class UserProfile(
 )
 
 /* ---------- Settings screen ---------- */
+/**
+ * Settings screen for:
+ * - Viewing read-only user profile fields.
+ * - Toggling hydration/medication reminders and background updates.
+ * - Picking reminder times.
+ * - Saving preferences to Firestore and scheduling alarms locally.
+ * - Logging out.
+ *
+ * Side effects:
+ * - Loads/saves `users/{uid}` document in Firestore (merge).
+ * - Schedules/cancels alarms via [ReminderScheduler].
+ * - Starts/stops background work via [ContextIngestWorker].
+ *
+ * Permissions:
+ * - On API 33+, requests POST_NOTIFICATIONS at runtime before saving preferences.
+ * - On API 31+, directs user to the system screen for SCHEDULE_EXACT_ALARM if needed.
+ */
 @Composable
 fun SettingsScreen(
     profile: UserProfile = UserProfile(),
@@ -73,15 +104,15 @@ fun SettingsScreen(
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Format DOB
+    // Format DOB for display.
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDob(ms: Long?) =
         ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt) } ?: "—"
 
-    // Logged-in flag
+    // Logged-in flag drives whether we load, show, and allow saving.
     var loggedIn by remember { mutableStateOf(Firebase.auth.currentUser != null) }
 
-    // Local profile state
+    // Working copy of the profile for display (read-only here).
     var shown by remember(profile) { mutableStateOf(profile) }
 
     // --- Runtime permission launcher (Android 13+ notifications) ---
@@ -91,6 +122,10 @@ fun SettingsScreen(
         scope.launch { snack.showSnackbar(if (granted) "Notifications enabled" else "Notifications permission denied") }
     }
 
+    /**
+     * Ensure POST_NOTIFICATIONS on API 33+ before we schedule notifications.
+     * We call this just-in-time on Save to keep first-run friction low.
+     */
     fun ensureNotificationPermission(onDenied: () -> Unit = {}) {
         if (Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
@@ -103,7 +138,7 @@ fun SettingsScreen(
         }
     }
 
-    // Preferences + reminder times (defaults)
+    // Preferences + reminder times (local UI state with sensible defaults).
     var hydration by remember { mutableStateOf(true) }
     var medication by remember { mutableStateOf(false) }
     var bgUpdates by remember { mutableStateOf(true) }
@@ -113,19 +148,20 @@ fun SettingsScreen(
     var medicationHour by remember { mutableStateOf(20) }
     var medicationMinute by remember { mutableStateOf(0) }
 
+    // Explicit defaults for quick restore on logout.
     val DEFAULT_HYDRATION_HOUR = 9
     val DEFAULT_HYDRATION_MINUTE = 0
     val DEFAULT_MEDICATION_HOUR = 20
     val DEFAULT_MEDICATION_MINUTE = 0
 
-
-    // Load Firestore profile + saved prefs
+    // Load Firestore profile + saved prefs once the user is logged in.
     LaunchedEffect(loggedIn) {
         if (!loggedIn) return@LaunchedEffect
         val uid = Firebase.auth.currentUser?.uid ?: return@LaunchedEffect
         try {
             val snap = Firebase.firestore.collection("users").document(uid).get().await()
             if (snap.exists()) {
+                // Populate profile display.
                 shown = UserProfile(
                     name = snap.getString("name") ?: "",
                     age = snap.getLong("age")?.toInt(),
@@ -134,7 +170,7 @@ fun SettingsScreen(
                     weightKg = snap.getLong("weightKg")?.toInt(),
                     dobMillis = snap.getLong("dobMillis")
                 )
-                // --- Load prefs if present ---
+                // Load saved preferences if available (otherwise keep local defaults).
                 hydration = snap.getBoolean("hydrationEnabled") ?: hydration
                 hydrationHour = snap.getLong("hydrationHour")?.toInt() ?: hydrationHour
                 hydrationMinute = snap.getLong("hydrationMinute")?.toInt() ?: hydrationMinute
@@ -152,7 +188,7 @@ fun SettingsScreen(
         }
     }
 
-    // Exact-alarm helper
+    // Exact-alarm capabilities helper for API 31+.
     fun canScheduleExact(): Boolean {
         if (Build.VERSION.SDK_INT < 31) return true
         val am = context.getSystemService(AlarmManager::class.java)
@@ -178,11 +214,13 @@ fun SettingsScreen(
         ) {
             Text("Settings", style = MaterialTheme.typography.headlineSmall)
 
-            // ---- Profile ----
+            // ---- Profile (read-only) ----
             Text("Profile", style = MaterialTheme.typography.titleMedium)
             if (!loggedIn) {
-                Text("You are logged out. Profile and preferences are disabled.",
-                    style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "You are logged out. Profile and preferences are disabled.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
             ProfileRow("Full name", shown.name.ifBlank { "—" })
             ProfileRow("Age", shown.age?.toString() ?: "—")
@@ -221,14 +259,16 @@ fun SettingsScreen(
                 onCheckedChange = { checked ->
                     bgUpdates = checked
                     if (!loggedIn) return@SettingSwitchRow
+                    // Toggle background work immediately for responsive UX.
                     if (checked) ContextIngestWorker.enqueue(context) else ContextIngestWorker.cancel(context)
                 }
             )
 
+            // ---- Save: request permissions → schedule/cancel → persist to Firestore ----
             Button(
                 enabled = loggedIn,
                 onClick = {
-                    // Ask for notifications on first Save
+                    // Ask for notifications on first Save (API 33+).
                     var aborted = false
                     ensureNotificationPermission { aborted = true }
                     if (aborted && Build.VERSION.SDK_INT >= 33) {
@@ -236,14 +276,14 @@ fun SettingsScreen(
                         return@Button
                     }
 
-                    // For exact alarms, ensure permission before scheduling medication
+                    // For exact alarms, send user to system settings if not allowed.
                     if (medication && !canScheduleExact()) {
                         requestExactAlarmSettings()
                         scope.launch { snack.showSnackbar("Enable 'Alarms & reminders' permission, then tap Save again.") }
                         return@Button
                     }
 
-                    // 1) Schedule / cancel alarms
+                    // 1) Schedule / cancel local alarms (idempotent).
                     onSavePrefs(hydration, medication)
 
                     if (hydration)
@@ -264,7 +304,7 @@ fun SettingsScreen(
                         ReminderScheduler.cancel(context, ReminderType.MEDICATION_REPEAT)
                     }
 
-                    // 2) Persist prefs to Firestore (merge into users/{uid})
+                    // 2) Persist preferences to Firestore (merge into users/{uid}).
                     val uid = Firebase.auth.currentUser?.uid
                     if (uid == null) {
                         scope.launch { snack.showSnackbar("Not signed in — preferences not saved to cloud.") }
@@ -302,21 +342,21 @@ fun SettingsScreen(
             // ---- Account actions ----
             OutlinedButton(
                 onClick = {
-                    // Sign out in place (no navigation)
+                    // Sign out locally (UI remains on this screen).
                     try { Firebase.auth.signOut() } catch (_: Exception) {}
 
-                    // Cancel background work/alarms
+                    // Cancel background work/alarms to avoid stray notifications.
                     ContextIngestWorker.cancel(context)
                     ReminderScheduler.cancel(context, ReminderType.HYDRATION_EXACT)
                     ReminderScheduler.cancel(context, ReminderType.HYDRATION_REPEAT)
                     ReminderScheduler.cancel(context, ReminderType.MEDICATION_EXACT)
                     ReminderScheduler.cancel(context, ReminderType.MEDICATION_REPEAT)
 
-                    // Clear profile & disable controls
+                    // Clear profile & disable controls.
                     shown = UserProfile()
                     loggedIn = false
 
-                    // 🔁 Restore default toggles + times immediately in UI
+                    // Restore UI defaults immediately for a clean post-logout state.
                     hydration = true
                     hydrationHour = DEFAULT_HYDRATION_HOUR
                     hydrationMinute = DEFAULT_HYDRATION_MINUTE
@@ -328,10 +368,11 @@ fun SettingsScreen(
                     bgUpdates = true
 
                     scope.launch { snack.showSnackbar("Signed out — defaults restored") }
+                    // Optional: invoke onLogout() if caller needs to react (navigation/analytics).
+                    onLogout()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Log out") }
-
 
             Button(onClick = onGoLogin, modifier = Modifier.fillMaxWidth()) {
                 Text("Go to Login")
@@ -341,6 +382,9 @@ fun SettingsScreen(
 }
 
 /* ---------- Small UI helpers ---------- */
+/**
+ * Two-column row for a label/value pair in the profile section.
+ */
 @Composable
 private fun ProfileRow(label: String, value: String) {
     Row(
@@ -352,6 +396,9 @@ private fun ProfileRow(label: String, value: String) {
     }
 }
 
+/**
+ * A labeled switch with enabled state support, used for preferences toggles.
+ */
 @Composable
 private fun SettingSwitchRow(
     title: String,

@@ -1,5 +1,26 @@
 package com.example.application
 
+/*
+ * LoginScreen + Google Sign-In (Credential Manager) for Firebase Auth.
+ *
+ * PURPOSE
+ * - Provide Email/Password and Google Sign-In paths.
+ * - On Google sign-in, upsert a minimal profile doc in Firestore: users/{uid}.
+ *
+ * PRIVACY & SCOPE
+ * - Writes only low-risk, non-sensitive fields on profile creation (uid, name,
+ *   email, role, createdAt). Avoid expanding with PII here.
+ * - Downstream sharing features should read only sanitized fields.
+ *
+ * RULES/SECURITY (must be set in Firestore Security Rules, not here)
+ * - Only the authenticated owner may read/write their users/{uid} document.
+ * - Never rely on client-side checks for access control.
+ *
+ * UX NOTES
+ * - Snackbars confirm success paths; errors are mapped to friendly messages.
+ * - Loading state gates double-taps during network operations.
+ */
+
 import android.content.Context
 import android.credentials.GetCredentialException
 import android.os.Build
@@ -38,9 +59,35 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+/**
+ * OAuth 2.0 Web client ID from Google Cloud console.
+ *
+ * IMPORTANT
+ * - This must be the **Web application** client ID that matches the Firebase
+ *   project; do not use the Android client ID here.
+ * - Keep this constant in app code (not secrets); it is an identifier, not a
+ *   secret. Real secrets should not be hardcoded.
+ */
+private const val WEB_CLIENT_ID =
+    "626852858933-ljvsadsirer77dpdts9jltdd8hbu4asm.apps.googleusercontent.com"
 
-private const val WEB_CLIENT_ID = "626852858933-ljvsadsirer77dpdts9jltdd8hbu4asm.apps.googleusercontent.com"
-
+/**
+ * Composable login screen that supports:
+ * - Email/Password authentication via Firebase Auth.
+ * - Google Sign-In using Android Credential Manager → Firebase credential.
+ *
+ * Side effects:
+ * - On Google sign-in success, upserts a minimal profile doc to Firestore at
+ *   users/{uid} (merge semantics).
+ *
+ * Navigation:
+ * - Calls [onLoggedIn] after successful sign-in so the caller can navigate.
+ *
+ * @param onLogin Legacy callback for email+password (not used directly here).
+ * @param onGoRegister Navigate to a registration screen.
+ * @param onForgotPassword Navigate to password reset UI.
+ * @param onLoggedIn Called when sign-in flow completes successfully.
+ */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 @Composable
 fun LoginScreen(
@@ -49,12 +96,12 @@ fun LoginScreen(
     onForgotPassword: () -> Unit = {},
     onLoggedIn: () -> Unit = {} // navigate after success
 ) {
-    // Form state
+    // -------- Form state --------
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var showPwd by rememberSaveable { mutableStateOf(false) }
 
-    // UI state
+    // -------- UI state --------
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -64,6 +111,7 @@ fun LoginScreen(
     Scaffold(
         snackbarHost = {
             SnackbarHost(snack) { data ->
+                // Green snackbar for positive confirmations; errors are inline text.
                 Snackbar(
                     snackbarData = data,
                     containerColor = Color(0xFF2E7D32),
@@ -82,6 +130,7 @@ fun LoginScreen(
             Text("Login", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
 
+            // ---- Email field ----
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it; error = null },
@@ -96,17 +145,21 @@ fun LoginScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // ---- Password field (with show/hide) ----
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it; error = null },
                 label = { Text("Password") },
                 singleLine = true,
-                visualTransformation = if (showPwd) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (showPwd) VisualTransformation.None
+                else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { showPwd = !showPwd }) {
                         Icon(
-                            if (showPwd) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = if (showPwd) "Hide password" else "Show password"
+                            if (showPwd) Icons.Filled.VisibilityOff
+                            else Icons.Filled.Visibility,
+                            contentDescription = if (showPwd) "Hide password"
+                            else "Show password"
                         )
                     }
                 },
@@ -117,6 +170,7 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // Inline errors are easier to correlate with the form than snackbar errors.
             if (error != null) {
                 Spacer(Modifier.height(8.dp))
                 Text(error!!, color = MaterialTheme.colorScheme.error)
@@ -132,6 +186,7 @@ fun LoginScreen(
             // ===== Email/Password Sign-in =====
             Button(
                 onClick = {
+                    // Basic syntactic validation (semantic checks occur server-side).
                     if (email.isBlank() || password.isBlank()) {
                         error = "Email and password are required."
                         return@Button
@@ -144,9 +199,11 @@ fun LoginScreen(
                                 .signInWithEmailAndPassword(email.trim(), password)
                                 .await()
                             snack.showSnackbar("Signed in successfully")
+                            // Small delay so users see the confirmation before navigation.
                             delay(800)
                             onLoggedIn()
                         } catch (e: Exception) {
+                            // Map common Firebase Auth errors to friendly messages.
                             error = when (e) {
                                 is FirebaseAuthInvalidUserException ->
                                     "No account found for this email."
@@ -164,7 +221,7 @@ fun LoginScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== Google Sign-in (Credential Manager + Firebase) =====
+            // ===== Google Sign-in (Credential Manager → Firebase) =====
             OutlinedButton(
                 onClick = {
                     loading = true
@@ -173,12 +230,16 @@ fun LoginScreen(
                         try {
                             val idToken = getGoogleIdToken(ctx)
                             if (idToken == null) {
-                                error = "No Google account/credential found. Add a Google account on this device and try again."
+                                // No available Google account/credential on device.
+                                error = "No Google account/credential found. " +
+                                        "Add a Google account on this device and try again."
                             } else {
+                                // Exchange Google ID token for a Firebase credential.
                                 val credential = GoogleAuthProvider.getCredential(idToken, null)
                                 val result = Firebase.auth.signInWithCredential(credential).await()
                                 val user = result.user
 
+                                // Upsert a minimal user profile (merge to avoid clobbering fields).
                                 user?.let {
                                     val doc = mapOf(
                                         "uid" to it.uid,
@@ -198,6 +259,7 @@ fun LoginScreen(
                                 onLoggedIn()
                             }
                         } catch (e: Exception) {
+                            // Most issues are provider config, network, or user cancellation.
                             error = e.localizedMessage ?: "Google sign-in failed."
                         } finally {
                             loading = false
@@ -209,6 +271,7 @@ fun LoginScreen(
 
             Spacer(Modifier.height(8.dp))
 
+            // Ancillary actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -221,12 +284,37 @@ fun LoginScreen(
     }
 }
 
-/** Credential Manager: get Google ID Token (tries authorized accounts, falls back to any account). */
+/**
+ * Requests a Google ID token via Android Credential Manager (Google Identity
+ * Services) and returns it for Firebase Auth sign-in.
+ *
+ * FLOW
+ * 1) Build a [GetGoogleIdOption] with the app's web client ID.
+ * 2) Request a credential from [CredentialManager].
+ * 3) If a Google ID token credential is returned, extract `idToken`.
+ *
+ * ERROR HANDLING
+ * - Returns `null` when no credential is available or user cancels.
+ * - Logs a succinct reason for telemetry/diagnosis; caller shows friendly UI.
+ *
+ * NOTE (production hardening)
+ * - Consider `setFilterByAuthorizedAccounts(true)` to prefer accounts already
+ *   authorized for your app and reduce accidental account selection friction.
+ * - Ensure your SHA credentials and OAuth client IDs are correctly configured
+ *   in Firebase/Google Cloud; otherwise provider config exceptions will occur.
+ *
+ * @param context Android context for the Credential Manager API.
+ * @return Google ID token string, or `null` if unavailable/cancelled.
+ * @throws Exception only if you choose to rethrow upstream (current impl swallows and logs).
+ */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 @Throws(Exception::class)
 suspend fun getGoogleIdToken(context: Context): String? {
     val cm = CredentialManager.create(context)
+
+    // Build an identity option for Google ID tokens.
     val option = GetGoogleIdOption.Builder()
+        // In production, you may use true to bias to previously authorized accounts.
         .setFilterByAuthorizedAccounts(false)
         .setServerClientId(WEB_CLIENT_ID)
         .build()
@@ -238,6 +326,8 @@ suspend fun getGoogleIdToken(context: Context): String? {
     return try {
         val result = cm.getCredential(context, request)
         val cred = result.credential
+
+        // Expect a Google ID token credential; otherwise, treat as “no credential”.
         if (cred is CustomCredential &&
             cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
         ) {
@@ -247,10 +337,11 @@ suspend fun getGoogleIdToken(context: Context): String? {
             null
         }
     } catch (e: androidx.credentials.exceptions.GetCredentialException) {
-
+        // Normalize common Credential Manager failure modes for logging/analytics.
         val reason = when (e) {
             is androidx.credentials.exceptions.NoCredentialException -> "NO_CREDENTIAL"
-            is androidx.credentials.exceptions.GetCredentialProviderConfigurationException -> "PROVIDER_CONFIG_ERROR"
+            is androidx.credentials.exceptions.GetCredentialProviderConfigurationException ->
+                "PROVIDER_CONFIG_ERROR"
             is androidx.credentials.exceptions.GetCredentialInterruptedException -> "INTERRUPTED"
             is androidx.credentials.exceptions.GetCredentialUnknownException -> "UNKNOWN"
             else -> e::class.simpleName ?: "GetCredentialException"
@@ -258,8 +349,8 @@ suspend fun getGoogleIdToken(context: Context): String? {
         Log.e("GSI", "GetCredential failed: $reason - ${e.message}", e)
         null
     } catch (e: Exception) {
+        // Catch-all: network or unexpected runtime issues.
         Log.e("GSI", "Unexpected error: ${e.message}", e)
         null
     }
-
 }
