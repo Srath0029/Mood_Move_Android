@@ -7,6 +7,9 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Authentication + initial profile persistence.
@@ -31,8 +34,15 @@ import kotlinx.coroutines.tasks.await
  *   enable case-insensitive queries when implementing "check your friend by email".
  */
 object AuthRepository {
+
+    /** Conveniently get the current uid (return null if not logged in) */
+
+    fun currentUserId(): String? = Firebase.auth.currentUser?.uid
     private val auth = Firebase.auth
     private val db = Firebase.firestore
+    // New: Login status
+    private val _isLoggedIn = MutableStateFlow(auth.currentUser != null)
+    val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
     /**
      * Registers a user and saves their profile to Firestore.
@@ -53,6 +63,12 @@ object AuthRepository {
      *
      * @return [Result] wrapping Unit on success or the underlying exception on failure.
      */
+    init {
+        // Listening for Firebase login/logout
+        auth.addAuthStateListener { fa ->
+            _isLoggedIn.value = (fa.currentUser != null)
+        }
+    }
     suspend fun registerAndSave(
         name: String,
         email: String,

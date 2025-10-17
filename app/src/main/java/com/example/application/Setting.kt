@@ -105,6 +105,20 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
 
     // Format DOB for display.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val isFineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val isCoarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+        if (isFineLocationGranted || isCoarseLocationGranted) {
+            scope.launch { snack.showSnackbar("Location permission granted. You can now enable background updates.") }
+        } else {
+            scope.launch { snack.showSnackbar("Location permission denied. Background updates cannot be enabled.") }
+        }
+    }
+
+    // Format DOB
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDob(ms: Long?) =
         ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt) } ?: "—"
@@ -257,10 +271,36 @@ fun SettingsScreen(
                 checked = bgUpdates,
                 enabled = loggedIn,
                 onCheckedChange = { checked ->
-                    bgUpdates = checked
                     if (!loggedIn) return@SettingSwitchRow
-                    // Toggle background work immediately for responsive UX.
-                    if (checked) ContextIngestWorker.enqueue(context) else ContextIngestWorker.cancel(context)
+
+                    if (checked) {
+                        // 1. Check permissions
+                        val hasFineLocationPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        val hasCoarseLocationPermission = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.ACCESS_COARSE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (hasFineLocationPermission || hasCoarseLocationPermission) {
+                            bgUpdates = true
+                            ContextIngestWorker.enqueue(context)
+                            scope.launch { snack.showSnackbar("Background updates enabled.") }
+                        } else {
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        }
+                    } else {
+                        // --- User wants to close the task ---
+                        bgUpdates = false
+                        ContextIngestWorker.cancel(context)
+                        scope.launch { snack.showSnackbar("Background updates disabled.") }
+                    }
                 }
             )
 
