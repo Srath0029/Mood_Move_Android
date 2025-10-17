@@ -11,6 +11,28 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Authentication + initial profile persistence.
+ *
+ * Responsibility
+ * - Creates a Firebase Auth user (email/password).
+ * - Updates the Auth displayName for quick UI use.
+ * - Persists a profile document at `users/{uid}` (merge semantics).
+ *
+ * Data minimization
+ * - Only store fields you actually need for features.
+ * - Treat age/height/weight/DOB as **sensitive**; avoid exposing them in any
+ *   shared or public collection. If you later implement sharing, create a
+ *   sanitized view/collection without PII.
+ *
+ * Firestore rules (not implemented here; required at backend)
+ * - Only the authenticated owner should read/write `users/{uid}`.
+ * - Deny public reads of sensitive fields.
+ *
+ * Lookup convenience (optional future enhancement)
+ * - Consider also writing a lower-cased email field (e.g., `email_lower`) to
+ *   enable case-insensitive queries when implementing "check your friend by email".
+ */
 object AuthRepository {
 
     /** Conveniently get the current uid (return null if not logged in) */
@@ -22,6 +44,25 @@ object AuthRepository {
     private val _isLoggedIn = MutableStateFlow(auth.currentUser != null)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
+    /**
+     * Registers a user and saves their profile to Firestore.
+     *
+     * Flow
+     * 1) Create user in Firebase Auth with email/password.
+     * 2) Update display name in Firebase Auth (for UI header, etc.).
+     * 3) Save profile into `users/{uid}` using merge (idempotent on re-runs).
+     *
+     * @param name Display name to set on the Auth user and in profile.
+     * @param email User email for sign-in and profile.
+     * @param password Plain password (sent to Firebase Auth SDK).
+     * @param age Optional age (sensitive; keep private).
+     * @param gender Optional gender label.
+     * @param heightCm Optional height in centimeters (sensitive; keep private).
+     * @param weightKg Optional weight in kilograms (sensitive; keep private).
+     * @param dobMillis Optional date of birth in epoch millis (sensitive; keep private).
+     *
+     * @return [Result] wrapping Unit on success or the underlying exception on failure.
+     */
     init {
         // Listening for Firebase login/logout
         auth.addAuthStateListener { fa ->
@@ -38,20 +79,22 @@ object AuthRepository {
         weightKg: Int?,
         dobMillis: Long?
     ): Result<Unit> = runCatching {
-        // 1) Create user in Firebase Auth
+        //  Create user in Firebase Auth
         val authResult = auth.createUserWithEmailAndPassword(email, password).await()
         val user = authResult.user ?: error("No FirebaseUser returned")
         val uid = user.uid
 
-        // 2) Update display name (KTX DSL)
+        //  Update display name (KTX DSL)
         val profile = userProfileChangeRequest { displayName = name }
         user.updateProfile(profile).await()
 
-        // 3) Persist profile into Firestore: users/{uid}
+        //  Persist profile into Firestore: users/{uid}
+        //    NOTE: Keep this document private via Firestore Security Rules.
         val doc = mapOf(
             "uid" to uid,
             "name" to name,
             "email" to email,
+            // If you plan to allow email-lookup, also store "email_lower" = email.lowercase()
             "age" to age,
             "gender" to gender,
             "heightCm" to heightCm,
@@ -63,7 +106,7 @@ object AuthRepository {
 
         db.collection("users")
             .document(uid)
-            .set(doc, SetOptions.merge())
+            .set(doc, SetOptions.merge()) // merge so re-runs don't clobber other fields
             .await()
     }
 }

@@ -5,14 +5,20 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
- * Destination
+ * Central registry of all app navigation destinations.
  *
- * Centralized list of all navigation targets (screens) in the app.
- * Each entry provides:
- * - [route]: unique string used by NavHost to navigate.
- * - [label]: short label used for UI (e.g., bottom bar text).
- * - [icon]: Material icon associated with the destination.
- * - [showInBottomBar]: whether this destination should appear in the bottom navigation.
+ * Why centralize:
+ * - Keeps routes stable and discoverable in one place (prevents hard-coded strings).
+ * - Allows UI (e.g., BottomBar) to map over a single source of truth.
+ * - Eases deep-linking: other layers can reference [route] safely.
+ *
+ * @property route Unique route string used by NavHost and deep links.
+ * @property label Short, user-visible label (e.g., bottom bar text).
+ * @property icon  Material icon to represent this destination in UI.
+ * @property showInBottomBar Whether it should appear in the bottom navigation.
+ *
+ * NOTE: Icons are placeholders chosen for quick prototyping. Swap to more
+ * semantically precise icons if desired (e.g., History/Insights/Analytics).
  */
 enum class Destination(
     val route: String,
@@ -20,17 +26,37 @@ enum class Destination(
     val icon: ImageVector,
     val showInBottomBar: Boolean,
 ) {
-    // Authentication screens (not shown in bottom bar)
-    LOGIN("login", "Login", Icons.Filled.CheckCircle, false),      // Sign-in screen
-    REGISTER("register", "Register", Icons.Filled.AddCircle, false),// Sign-up form
-    FORGOT("forgot", "Forgot", Icons.Filled.LockOpen, false),       // Forgot-password flow
+    // ---- Authentication (not part of bottom bar) ----
+    /** Sign-in screen (navigated to on app start if unauthenticated). */
+    LOGIN("login", "Login", Icons.Filled.CheckCircle, false),
 
-    // Main tabs (shown in the bottom navigation)
-    HOME("home", "Home", Icons.Filled.Home, true),                  // Landing dashboard with quick actions
-    LOG("log", "Log", Icons.Filled.Edit, true),                     // Daily log form (date/type/duration/mood/intensity)
-    HISTORY("history", "History", Icons.Filled.Build, true),        // Past entries list with filters and actions
-    INSIGHTS("insights", "Insights", Icons.Filled.ShoppingCart, true), // Weekly trends/charts and tips
+    /** Sign-up form for new users. */
+    REGISTER("register", "Register", Icons.Filled.AddCircle, false),
 
-    // App settings (opened from the top app-bar action, not a bottom tab)
-    SETTINGS("settings", "Settings", Icons.Filled.Settings, false); // Profile summary, reminders, background updates
+    /** Forgot-password flow (email reset). */
+    FORGOT("forgot", "Forgot", Icons.Filled.LockOpen, false),
+
+    // ---- Main tabs (appear in bottom bar) ----
+    /** Landing dashboard with quick actions and summaries. */
+    HOME("home", "Home", Icons.Filled.Home, true),
+
+    /** Daily log form (date/type/duration/mood/intensity). */
+    LOG("log", "Log", Icons.Filled.Edit, true),
+
+    /** Past entries with filters/actions (edit/delete), export options, etc. */
+    HISTORY("history", "History", Icons.Filled.Build, true),
+
+    /** Weekly trends/charts and tips derived from stored data. */
+    INSIGHTS("insights", "Insights", Icons.Filled.ShoppingCart, true),
+
+    // ---- Settings (navigable, but not a bottom tab) ----
+    /** Profile summary, reminders, background updates, and app preferences. */
+    SETTINGS("settings", "Settings", Icons.Filled.Settings, false);
 }
+
+/*
+ * Implementation notes:
+ * - Keep route strings stable; changing them breaks saved state/deep links.
+ * - Bottom bar can be built via: Destination.values().filter { it.showInBottomBar }.
+ * - If you add a new tab, supply a distinct icon and concise label (<= 10–12 chars).
+ */
