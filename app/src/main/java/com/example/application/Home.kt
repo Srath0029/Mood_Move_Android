@@ -123,10 +123,6 @@ fun HomeScreen(
     }
 }
 
-private fun AuthRepository.currentUserId() {
-    TODO("Not yet implemented")
-}
-
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
