@@ -1,5 +1,7 @@
 package com.example.application
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -17,16 +19,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable  // ✅ added
 
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
     val navController = rememberNavController()
-// Read login status
+
+    // Read login status
     val isLoggedIn by AuthRepository.isLoggedIn.collectAsState(initial = false)
 
-// Remember the route the user wanted to go but was blocked, and jump back after successful login
-    var pendingRoute by remember { mutableStateOf<String?>(null) }
+    // Remember the route the user wanted to go but was blocked, and jump back after successful login
+    var pendingRoute by rememberSaveable { mutableStateOf<String?>(null) } // ✅ saveable now
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val context = LocalContext.current
@@ -64,11 +70,10 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         }
     }
 
-
     fun navigateGuarded(route: String) {
         // These are routes that are accessible even when not logged in.
         val unprotected = setOf(
-            Destination.SETTINGS.route,
+            // Destination.SETTINGS.route, // ❌ removed to protect Settings
             Destination.LOGIN.route,
             Destination.REGISTER.route,
             Destination.FORGOT.route
@@ -93,15 +98,13 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
         else                       -> "Navigation Bar Demo App"
     }
 
-
-
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title, style = MaterialTheme.typography.titleMedium) },
                 actions = {
-                    IconButton(onClick = { navigateSingleTopTo(Destination.SETTINGS.route) }) {
+                    // ✅ use guarded navigation so pendingRoute is captured when logged out
+                    IconButton(onClick = { navigateGuarded(Destination.SETTINGS.route) }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
@@ -143,15 +146,12 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                     onGoRegister = { navigateSingleTopTo(Destination.REGISTER.route) },
                     onForgotPassword = { navigateSingleTopTo(Destination.FORGOT.route) },
                     onLoggedIn = {
-                        val target = pendingRoute ?: Destination.HOME.route
-                        pendingRoute = null
-                        navController.navigate(target) {
+                        navController.navigate(Destination.SETTINGS.route) {
                             popUpTo(navController.graph.findStartDestination().id) { inclusive = false; saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
                     }
-
                 )
             }
             composable(Destination.REGISTER.route) {
@@ -201,7 +201,7 @@ fun BottomNavigationBar(startRoute: String = Destination.HOME.route) {
                     onQuickLog   = { navigateGuarded(Destination.LOG.route) },
                     onGoHistory  = { navigateGuarded(Destination.HISTORY.route) },
                     onGoInsights = { navigateGuarded(Destination.INSIGHTS.route) },
-                    onGoSettings = { navigateGuarded(Destination.SETTINGS.route) } // Settings 放行
+                    onGoSettings = { navigateGuarded(Destination.SETTINGS.route) } // Settings guarded
                 )
             }
             composable(Destination.LOG.route)      { LogScreen() }

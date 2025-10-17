@@ -33,6 +33,23 @@ import kotlinx.coroutines.delay
 import java.util.Date
 import androidx.compose.foundation.pager.HorizontalPager
 
+/**
+ * HomeScreen
+ *
+ * Dashboard for quick navigation and weekly overview.
+ *
+ * Shows:
+ * - Quick actions (Log, History, Insights, Settings).
+ * - A public activity carousel when signed in.
+ * - Weekly stats (avg mood, total minutes, avg temp) and a compact chart.
+ *
+ * Data
+ * - Loads user-week data and public activities only when [isLoggedIn] is true.
+ * - Aggregation is performed in-memory via [aggregateWeek].
+ *
+ * Callbacks
+ * - [onQuickLog], [onGoHistory], [onGoInsights], [onGoSettings] drive navigation.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
@@ -44,6 +61,7 @@ fun HomeScreen(
 ) {
     val repo = remember { HomeRepositoryFirebase() }
 
+    // User week data (reloaded when login state changes).
     val week by produceState<List<HomeDay>>(
         initialValue = emptyList(),
         key1 = isLoggedIn
@@ -56,6 +74,7 @@ fun HomeScreen(
         }
     }
 
+    // Public feed (visible only when logged in).
     val publicActivities by produceState<List<PublicActivity>>(
         initialValue = emptyList(),
         key1 = isLoggedIn
@@ -123,7 +142,12 @@ fun HomeScreen(
     }
 }
 
-
+/**
+ * ActivityCarousel
+ *
+ * Auto-advancing (5s) pager showing recent public activities.
+ * Displays "user did a <type> <relative time>" per page.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ActivityCarousel(activities: List<PublicActivity>, modifier: Modifier = Modifier) {
@@ -163,7 +187,9 @@ private fun ActivityCarousel(activities: List<PublicActivity>, modifier: Modifie
     }
 }
 
-
+/**
+ * Returns a short relative label for a past [Date] ("just now", "12 minutes ago", etc.).
+ */
 private fun formatRelativeTime(past: Date): String {
     val now = Date()
     val seconds = (now.time - past.time) / 1000
@@ -179,6 +205,11 @@ private fun formatRelativeTime(past: Date): String {
     }
 }
 
+/**
+ * QuickActionCard
+ *
+ * Compact card used for primary navigation shortcuts on the Home screen.
+ */
 @Composable
 private fun QuickActionCard(
     title: String,
@@ -204,6 +235,11 @@ private fun QuickActionCard(
     }
 }
 
+/**
+ * HomeStat
+ *
+ * Small metric card for a (label, value) pair.
+ */
 @Composable
 private fun HomeStat(
     label: String,
@@ -225,6 +261,11 @@ private fun HomeStat(
     }
 }
 
+/**
+ * Aggregates multiple [HomeDay] rows per date:
+ * - sums minutes, averages temperature and mood.
+ * Returns a date-sorted list for the chart.
+ */
 private fun aggregateWeek(raw: List<HomeDay>): List<HomeDay> {
     return raw
         .groupBy { it.date }
@@ -237,6 +278,20 @@ private fun aggregateWeek(raw: List<HomeDay>): List<HomeDay> {
         .sortedBy { it.date }
 }
 
+/**
+ * HomeWeeklyChart
+ *
+ * Canvas-based weekly bar chart showing temperature per day with:
+ * - a minutes label above each bar, and
+ * - an optional mood emoji above the label.
+ * Axes and labels use the native canvas for text drawing.
+ *
+ * @param days       Aggregated week data in chronological order.
+ * @param barColor   Bar fill color.
+ * @param axisColor  Axis and tick color.
+ * @param textColor  Label color.
+ * @param showEmoji  Whether to render mood emoji above minutes.
+ */
 @Composable
 private fun HomeWeeklyChart(
     days: List<HomeDay>,

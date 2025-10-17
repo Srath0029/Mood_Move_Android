@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -124,7 +125,7 @@ fun SettingsScreen(
         ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt) } ?: "—"
 
     // Logged-in flag drives whether we load, show, and allow saving.
-    var loggedIn by remember { mutableStateOf(Firebase.auth.currentUser != null) }
+    val loggedIn by AuthRepository.isLoggedIn.collectAsState(initial = false)
 
     // Working copy of the profile for display (read-only here).
     var shown by remember(profile) { mutableStateOf(profile) }
@@ -243,7 +244,7 @@ fun SettingsScreen(
             ProfileRow("Weight", shown.weightKg?.let { "$it kg" } ?: "—")
             ProfileRow("Date of birth", formatDob(shown.dobMillis))
 
-            Divider()
+            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
             // ---- Preferences (reminders + background updates) ----
             Text("Preferences", style = MaterialTheme.typography.titleMedium)
@@ -274,7 +275,7 @@ fun SettingsScreen(
                     if (!loggedIn) return@SettingSwitchRow
 
                     if (checked) {
-                        // 1. Check permissions
+                        //  Check permissions
                         val hasFineLocationPermission = ContextCompat.checkSelfPermission(
                             context, Manifest.permission.ACCESS_FINE_LOCATION
                         ) == PackageManager.PERMISSION_GRANTED
@@ -323,7 +324,7 @@ fun SettingsScreen(
                         return@Button
                     }
 
-                    // 1) Schedule / cancel local alarms (idempotent).
+                    // Schedule / cancel local alarms (idempotent).
                     onSavePrefs(hydration, medication)
 
                     if (hydration)
@@ -344,7 +345,7 @@ fun SettingsScreen(
                         ReminderScheduler.cancel(context, ReminderType.MEDICATION_REPEAT)
                     }
 
-                    // 2) Persist preferences to Firestore (merge into users/{uid}).
+                    // Persist preferences to Firestore (merge into users/{uid}).
                     val uid = Firebase.auth.currentUser?.uid
                     if (uid == null) {
                         scope.launch { snack.showSnackbar("Not signed in — preferences not saved to cloud.") }
@@ -394,7 +395,6 @@ fun SettingsScreen(
 
                     // Clear profile & disable controls.
                     shown = UserProfile()
-                    loggedIn = false
 
                     // Restore UI defaults immediately for a clean post-logout state.
                     hydration = true
@@ -408,7 +408,6 @@ fun SettingsScreen(
                     bgUpdates = true
 
                     scope.launch { snack.showSnackbar("Signed out — defaults restored") }
-                    // Optional: invoke onLogout() if caller needs to react (navigation/analytics).
                     onLogout()
                 },
                 modifier = Modifier.fillMaxWidth()

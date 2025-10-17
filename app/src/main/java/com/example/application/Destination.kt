@@ -53,10 +53,3 @@ enum class Destination(
     /** Profile summary, reminders, background updates, and app preferences. */
     SETTINGS("settings", "Settings", Icons.Filled.Settings, false);
 }
-
-/*
- * Implementation notes:
- * - Keep route strings stable; changing them breaks saved state/deep links.
- * - Bottom bar can be built via: Destination.values().filter { it.showInBottomBar }.
- * - If you add a new tab, supply a distinct icon and concise label (<= 10–12 chars).
- */

@@ -19,13 +19,28 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
-// InsightsScreen 的 UI 状态
+/**
+ * UI state for the Insights screen.
+ *
+ * @property isLoading True while data is being fetched or a listener is attaching.
+ * @property insights  Seven-day series used by the charts and stats.
+ * @property error     Non-null when an error occurs while loading.
+ */
 data class InsightsUiState(
     val isLoading: Boolean = true,
     val insights: List<DayInsight> = emptyList(),
     val error: String? = null
 )
 
+/**
+ * InsightsViewModel
+ *
+ * Responsibilities
+ * - React to FirebaseAuth state changes and (re)attach a Firestore listener.
+ * - Fetch logs for the last seven days and aggregate them into [DayInsight].
+ * - Expose data as lifecycle-friendly state via [InsightsUiState].
+ * - Release listeners in [onCleared] to avoid leaks.
+ */
 class InsightsViewModel : ViewModel() {
 
     private val db = Firebase.firestore
@@ -41,15 +56,16 @@ class InsightsViewModel : ViewModel() {
         createAuthStateListener()
     }
 
+    /**
+     * Subscribes to FirebaseAuth changes; loads data on sign-in, clears on sign-out.
+     */
     private fun createAuthStateListener() {
         authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
-                // 用户登录后，开始监听最近七天的数据
                 Log.d("InsightsViewModel", "Auth state changed: User logged in (${user.uid})")
                 fetchLastSevenDaysInsights(user.uid)
             } else {
-                // 用户退出后，清空数据
                 Log.d("InsightsViewModel", "Auth state changed: User logged out")
                 stopListenerAndClearUI()
             }
@@ -57,15 +73,18 @@ class InsightsViewModel : ViewModel() {
         auth.addAuthStateListener(authStateListener!!)
     }
 
+    /**
+     * Attaches a Firestore listener for the last seven days of logs for [userId].
+     * Replaces any existing listener and drives the UI to a loading state first.
+     */
     private fun fetchLastSevenDaysInsights(userId: String) {
-        stopListenerAndClearUI() // 开始前先停止旧的监听
+        stopListenerAndClearUI() // Ensure the old listener is removed before attaching a new one
         _uiState.update { it.copy(isLoading = true) }
 
-        // 1. 计算七天前的起始时间戳
+        // Window: from local midnight 6 days ago up to now (inclusive)
         val sevenDaysAgo = LocalDate.now().minusDays(6)
         val startTimestamp = sevenDaysAgo.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-        // 2. 查询该用户从七天前到现在的全部日志
         logsListener = db.collection("logs")
             .whereEqualTo("userId", userId)
             .whereGreaterThanOrEqualTo("dateMillis", startTimestamp)
@@ -78,13 +97,17 @@ class InsightsViewModel : ViewModel() {
 
                 if (snapshot != null) {
                     val logs = snapshot.toObjects(ExerciseLog::class.java)
-                    // 3. 将原始日志处理成每日洞察数据
+                    // Map raw logs to seven daily points for the charts
                     val dailyInsights = processLogsIntoDailyInsights(logs)
                     _uiState.update { it.copy(isLoading = false, insights = dailyInsights) }
                 }
             }
     }
 
+    /**
+     * Aggregates raw logs into a fixed seven-day series (today back to -6 days).
+     * Empty days are represented with zeros for chart continuity.
+     */
     private fun processLogsIntoDailyInsights(logs: List<ExerciseLog>): List<DayInsight> {
         val groupedByDate: Map<LocalDate, List<ExerciseLog>> = logs.groupBy {
             Instant.ofEpochMilli(it.dateMillis ?: 0).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -93,20 +116,16 @@ class InsightsViewModel : ViewModel() {
         val today = LocalDate.now()
         val result = mutableListOf<DayInsight>()
 
-        // 遍历最近七天的每一天
+        // Walk back 6..0 days to fill seven points in order
         for (i in 6 downTo 0) {
             val date = today.minusDays(i.toLong())
             val logsForDay = groupedByDate[date]
 
             if (logsForDay.isNullOrEmpty()) {
-                // 如果当天没有日志，添加一条默认数据
                 result.add(DayInsight(date, mood = 0, minutes = 0, tempC = 0))
             } else {
-                // 如果当天有日志，计算平均值和总和
                 val totalMinutes = logsForDay.sumOf { calculateDuration(it.startTime, it.endTime) }
                 val averageMood = logsForDay.map { it.moodScore }.average().roundToInt()
-
-                // --- 已修正：使用正确的字段名 temperatureCelsius ---
                 val tempsWithData: List<Double> = logsForDay.mapNotNull { it.temperatureCelsius }
                 val averageTemp = if (tempsWithData.isNotEmpty()) tempsWithData.average().roundToInt() else 0
 
@@ -116,11 +135,18 @@ class InsightsViewModel : ViewModel() {
         return result
     }
 
+    /**
+     * Removes the Firestore listener and resets the UI to its initial state.
+     */
     private fun stopListenerAndClearUI() {
         logsListener?.remove()
-        _uiState.update { InsightsUiState() } // 重置UI状态
+        _uiState.update { InsightsUiState() }
     }
 
+    /**
+     * Parses two "HH:mm" strings and returns a non-negative duration (minutes).
+     * Returns 0 on null inputs or parse errors.
+     */
     private fun calculateDuration(startTimeStr: String?, endTimeStr: String?): Int {
         if (startTimeStr == null || endTimeStr == null) return 0
         return try {
@@ -133,6 +159,9 @@ class InsightsViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Lifecycle cleanup: detach listeners to prevent leaks.
+     */
     override fun onCleared() {
         super.onCleared()
         authStateListener?.let { auth.removeAuthStateListener(it) }

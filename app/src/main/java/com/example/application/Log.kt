@@ -41,13 +41,35 @@ import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import com.example.application.OpenWeatherRetrofit
 
+/**
+ * Internal marker for which time field the picker is editing.
+ */
 private enum class TimePickerTarget { START, END }
 
-
+/**
+ * LogScreen
+ *
+ * Purpose
+ * - Collect a daily activity entry with date, start/end time, type, mood, and intensity.
+ * - On submit: request location (with permission), fetch temperature, and persist to Firestore.
+ *
+ * Validation
+ * - Date required; type, mood, intensity required.
+ * - Start time required; end time must be after start and within +1 hour.
+ * - For today's date, start time cannot be in the future.
+ *
+ * Permissions
+ * - Requests ACCESS_FINE/COARSE_LOCATION at runtime before recording location/temperature.
+ *
+ * Side effects
+ * - Reads current user from Firebase Auth for `userEmail`/`userId`.
+ * - Writes an `ExerciseLog` to the `logs` collection.
+ * - Retrieves temperature via OpenWeather One Call Time Machine (Retrofit).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogScreen() {
-    // --- State and context ---
+    // Screen state and utilities
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -56,7 +78,7 @@ fun LogScreen() {
     var showSuccessDialog by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
 
-    // --- Form status ---
+    // Form fields
     var selectedDateMillis by rememberSaveable { mutableStateOf<Long?>(null) }
     var openDatePicker by remember { mutableStateOf(false) }
     val dateState = rememberDatePickerState(
@@ -80,26 +102,24 @@ fun LogScreen() {
     val intensityOptions = listOf("High", "Medium", "Low")
     var selectedIntensity by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // --- Location service client ---
+    // Location
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-    // --- Permission request launcher ---
+    // Runtime permission launcher for location
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
             if (permissions.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false) ||
                 permissions.getOrDefault(Manifest.permission.ACCESS_COARSE_LOCATION, false)
             ) {
-                // Permission is granted, prompt the user to click the submit button again
                 scope.launch { snackbarHostState.showSnackbar("Permission granted, please submit again.") }
             } else {
-                // Permission denied
                 scope.launch { snackbarHostState.showSnackbar("Requires location permission to record.") }
             }
         }
     )
 
-    // --- Logical function ---
+    // Formatting helpers
     val formatter = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.getDefault()) }
     fun formatDate(millis: Long?): String =
         millis?.let { ms ->
@@ -109,14 +129,14 @@ fun LogScreen() {
     val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
     fun formatTime(time: LocalTime?): String = time?.format(timeFormatter) ?: "Select time"
 
-    // --- Field level error status flag ---
+    // Field errors
     val dateError = showErrors && selectedDateMillis == null
     val typeError = showErrors && selectedType.isBlank()
     val moodError = showErrors && selectedMood == null
     val intensityError = showErrors && selectedIntensity == null
     val startTimeError = showErrors && selectedStartTime == null
 
-    // These two local variables are to solve Kotlin's smart conversion problem
+    // Avoid smart-cast issues by copying to local vals
     val localStartTime = selectedStartTime
     val localEndTime = selectedEndTime
 
@@ -146,9 +166,13 @@ fun LogScreen() {
         showErrors = false
     }
 
+    /**
+     * Validates inputs, requests permissions if needed, reads location & temperature,
+     * and writes a new `ExerciseLog` to Firestore.
+     */
     fun submit() {
         scope.launch {
-            // 1. Form Validation
+            // Validate required fields and time constraints
             showErrors = true
             val localStartTime = selectedStartTime
             val localEndTime = selectedEndTime
@@ -161,7 +185,7 @@ fun LogScreen() {
             isSubmitting = true
 
             try {
-                // 2. Check and request location permission
+                // Ensure location permission before accessing location/temperature
                 if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     locationPermissionLauncher.launch(arrayOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -171,11 +195,11 @@ fun LogScreen() {
                     return@launch
                 }
 
-                // 3. Get the location
+                // Last known location (may be null)
                 val location = fusedLocationClient.lastLocation.await()
                 val geoPoint = if (location != null) GeoPoint(location.latitude, location.longitude) else null
 
-                // 4. Get temperature
+                // Temperature at start time/place, when possible
                 val temperature = if (location != null && selectedDateMillis != null && selectedStartTime != null) {
                     getTemperature(
                         latitude = location.latitude,
@@ -187,12 +211,12 @@ fun LogScreen() {
                     null
                 }
 
-                // 5. Get the current user's Email
+                // Current user identifiers
                 val currentUser = Firebase.auth.currentUser
                 val userEmail = currentUser?.email
                 val userId = currentUser?.uid
 
-                // 6. Construct data object
+                // Build log entry
                 val logEntry = ExerciseLog(
                     userEmail = userEmail,
                     userId = userId,
@@ -206,10 +230,10 @@ fun LogScreen() {
                     temperatureCelsius = temperature
                 )
 
-                // 7. Save to Firestore
+                // Persist
                 Firebase.firestore.collection("logs").add(logEntry).await()
 
-                // 8. Display a pop-up window after success
+                // Success dialog
                 showSuccessDialog = true
 
             } catch (e: Exception) {
@@ -221,7 +245,7 @@ fun LogScreen() {
         }
     }
 
-    // --- UI ---
+    // UI
     Scaffold(snackbarHost = { SnackbarHost(hostState = snackbarHostState) }) { innerPadding ->
         Column(
             modifier = Modifier
@@ -400,7 +424,7 @@ fun LogScreen() {
                 )
             }
 
-            // --- Time Picker Dialog Logic ---
+            // Time picker dialog
             if (timePickerTarget != null) {
                 val isStartTimePicker = timePickerTarget == TimePickerTarget.START
                 val timeState = rememberTimePickerState(
@@ -408,7 +432,7 @@ fun LogScreen() {
                     initialMinute = if (isStartTimePicker) selectedStartTime?.minute ?: LocalTime.now().minute else selectedEndTime?.minute ?: LocalTime.now().minute,
                     is24Hour = true
                 )
-                // 1. Modify the state variable so that it can save specific error information
+                // Inline error state for dialog
                 var showTimePickerError by remember { mutableStateOf(false) }
                 var timePickerErrorMessage by remember { mutableStateOf("") }
 
@@ -421,7 +445,6 @@ fun LogScreen() {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             TimePicker(state = timeState)
 
-                            // 3. Update the UI to display error information
                             if (showTimePickerError) {
                                 Text(
                                     modifier = Modifier.padding(top = 8.dp),
@@ -516,7 +539,6 @@ fun LogScreen() {
                 )
             }
 
-
             /* ---------------- Submit ---------------- */
             Spacer(Modifier.height(8.dp))
             Button(
@@ -559,8 +581,11 @@ fun LogScreen() {
     }
 }
 
-
-// --- Weather API call function ---
+/**
+ * Calls OpenWeather "time machine" to estimate ambient temperature at a given
+ * time and location. Returns null on failure or when no current/hourly/data
+ * fields are present.
+ */
 private suspend fun getTemperature(
     latitude: Double,
     longitude: Double,
@@ -574,7 +599,6 @@ private suspend fun getTemperature(
     val timestamp = selectedDateTime
         .atZone(ZoneId.systemDefault())
         .toEpochSecond()
-
 
     val apiKey = "197d431fa550c96a045c38749be83926"
 

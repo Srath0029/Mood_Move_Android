@@ -6,69 +6,60 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.tasks.await
 
 /**
- * Authentication + initial profile persistence.
+ * AuthRepository
  *
- * Responsibility
- * - Creates a Firebase Auth user (email/password).
- * - Updates the Auth displayName for quick UI use.
- * - Persists a profile document at `users/{uid}` (merge semantics).
+ * Purpose
+ * - Wraps Firebase Authentication for email/password sign-up.
+ * - Persists the initial user profile to Firestore at `users/{uid}`.
+ * - Exposes a simple auth state (`isLoggedIn`) for UI.
  *
- * Data minimization
- * - Only store fields you actually need for features.
- * - Treat age/height/weight/DOB as **sensitive**; avoid exposing them in any
- *   shared or public collection. If you later implement sharing, create a
- *   sanitized view/collection without PII.
- *
- * Firestore rules (not implemented here; required at backend)
- * - Only the authenticated owner should read/write `users/{uid}`.
- * - Deny public reads of sensitive fields.
- *
- * Lookup convenience (optional future enhancement)
- * - Consider also writing a lower-cased email field (e.g., `email_lower`) to
- *   enable case-insensitive queries when implementing "check your friend by email".
+ * Security & data
+ * - Store only fields required by features.
+ * - Age/height/weight/DOB are owner-only fields; secure them via Firestore rules.
  */
 object AuthRepository {
 
-    /** Conveniently get the current uid (return null if not logged in) */
-
+    /** Returns the current user's uid or null if signed out. */
     fun currentUserId(): String? = Firebase.auth.currentUser?.uid
+
     private val auth = Firebase.auth
     private val db = Firebase.firestore
-    // New: Login status
+
+    /** Auth session state for UI observation. */
     private val _isLoggedIn = MutableStateFlow(auth.currentUser != null)
     val isLoggedIn: StateFlow<Boolean> = _isLoggedIn.asStateFlow()
 
-    /**
-     * Registers a user and saves their profile to Firestore.
-     *
-     * Flow
-     * 1) Create user in Firebase Auth with email/password.
-     * 2) Update display name in Firebase Auth (for UI header, etc.).
-     * 3) Save profile into `users/{uid}` using merge (idempotent on re-runs).
-     *
-     * @param name Display name to set on the Auth user and in profile.
-     * @param email User email for sign-in and profile.
-     * @param password Plain password (sent to Firebase Auth SDK).
-     * @param age Optional age (sensitive; keep private).
-     * @param gender Optional gender label.
-     * @param heightCm Optional height in centimeters (sensitive; keep private).
-     * @param weightKg Optional weight in kilograms (sensitive; keep private).
-     * @param dobMillis Optional date of birth in epoch millis (sensitive; keep private).
-     *
-     * @return [Result] wrapping Unit on success or the underlying exception on failure.
-     */
     init {
-        // Listening for Firebase login/logout
+        // Keep session state in sync with FirebaseAuth.
         auth.addAuthStateListener { fa ->
             _isLoggedIn.value = (fa.currentUser != null)
         }
     }
+
+    /**
+     * Registers a new user and writes their profile document.
+     *
+     * Steps
+     * 1) Create the Auth user with email/password.
+     * 2) Set `displayName` in Firebase Auth.
+     * 3) Upsert `users/{uid}` (merge semantics).
+     *
+     * @param name      Display name for Auth and Firestore.
+     * @param email     Sign-in email, also stored in profile.
+     * @param password  Plain password passed to Firebase Auth SDK.
+     * @param age       Optional age.
+     * @param gender    Optional gender label.
+     * @param heightCm  Optional height in centimeters.
+     * @param weightKg  Optional weight in kilograms.
+     * @param dobMillis Optional date of birth (epoch millis).
+     * @return          Result<Unit> with success or the thrown exception.
+     */
     suspend fun registerAndSave(
         name: String,
         email: String,
@@ -79,22 +70,20 @@ object AuthRepository {
         weightKg: Int?,
         dobMillis: Long?
     ): Result<Unit> = runCatching {
-        //  Create user in Firebase Auth
+        // Create user
         val authResult = auth.createUserWithEmailAndPassword(email, password).await()
         val user = authResult.user ?: error("No FirebaseUser returned")
         val uid = user.uid
 
-        //  Update display name (KTX DSL)
+        // Set displayName
         val profile = userProfileChangeRequest { displayName = name }
         user.updateProfile(profile).await()
 
-        //  Persist profile into Firestore: users/{uid}
-        //    NOTE: Keep this document private via Firestore Security Rules.
+        // Write profile
         val doc = mapOf(
             "uid" to uid,
             "name" to name,
             "email" to email,
-            // If you plan to allow email-lookup, also store "email_lower" = email.lowercase()
             "age" to age,
             "gender" to gender,
             "heightCm" to heightCm,
@@ -106,7 +95,7 @@ object AuthRepository {
 
         db.collection("users")
             .document(uid)
-            .set(doc, SetOptions.merge()) // merge so re-runs don't clobber other fields
+            .set(doc, SetOptions.merge())
             .await()
     }
 }

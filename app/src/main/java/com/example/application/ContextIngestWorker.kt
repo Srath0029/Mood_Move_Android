@@ -22,19 +22,34 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.TimeUnit
 
+/**
+ * ContextIngestWorker
+ *
+ * Periodic background worker that captures a single location sample and stores
+ * it in Room. Intended to run under user consent with appropriate location
+ * permissions (foreground and, on API 29+, background).
+ *
+ * Flow
+ * 1) Validate runtime permissions.
+ * 2) Request a current location (balanced accuracy).
+ * 3) Insert (lat, lon) into the local database.
+ *
+ * Scheduling
+ * - Use [enqueue] to register a unique periodic job (15-minute interval).
+ * - Use [cancel] to stop the job.
+ */
 class ContextIngestWorker(
     private val appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    // Get the client of location service
+    // Fused Location Provider for on-demand location fetches.
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(appContext)
 
     override suspend fun doWork(): Result {
         Log.d(TAG, "Worker started...")
 
-        // 1. Check location permission
-
+        // Permission gate: fail fast if the app lacks required location access.
         if (!hasLocationPerms()) {
             Log.e(TAG, "Missing foreground/background location permissions for background work.")
             return Result.failure()
@@ -50,7 +65,7 @@ class ContextIngestWorker(
         }
 
         try {
-            // 2. Get the current location
+            // Fetch one location fix with balanced power accuracy.
             Log.d(TAG, "Fetching current location...")
             val location = fusedLocationClient.getCurrentLocation(
                 Priority.PRIORITY_BALANCED_POWER_ACCURACY,
@@ -60,14 +75,12 @@ class ContextIngestWorker(
             if (location != null) {
                 Log.d(TAG, "Location found: Lat=${location.latitude}, Lon=${location.longitude}")
 
-                // 3. Create data entity
+                // 3) Persist to Room.
                 val locationEntity = LocationEntity(
                     latitude = location.latitude,
                     longitude = location.longitude
                 )
 
-                // 4. Store data in the Room database
-                Log.d(TAG, "Inserting location into database...")
                 val database = AppDatabase.getDatabase(appContext)
                 database.locationDao().insert(locationEntity)
 
@@ -85,6 +98,10 @@ class ContextIngestWorker(
         }
     }
 
+    /**
+     * Returns true if foreground (fine or coarse) and, on API 29+, background
+     * location permissions are granted.
+     */
     private fun hasLocationPerms(): Boolean {
         val fine = ActivityCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ActivityCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -98,6 +115,10 @@ class ContextIngestWorker(
         const val UNIQUE_NAME = "ContextFeeder"
         private const val TAG = "ContextIngestWorker"
 
+        /**
+         * Builds a periodic request with basic constraints and exponential backoff.
+         * Interval is fixed at 15 minutes (WorkManager minimum).
+         */
         fun buildRequest(): PeriodicWorkRequest {
             val constraints = Constraints.Builder()
                 // .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -112,6 +133,9 @@ class ContextIngestWorker(
                 .build()
         }
 
+        /**
+         * Enqueues the unique periodic job; existing work is kept if present.
+         */
         fun enqueue(context: Context) {
             Log.d(TAG, "Enqueuing periodic work.")
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -121,6 +145,9 @@ class ContextIngestWorker(
             )
         }
 
+        /**
+         * Cancels the unique periodic job and any of its scheduled runs.
+         */
         fun cancel(context: Context) {
             Log.d(TAG, "Cancelling unique work.")
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_NAME)

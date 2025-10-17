@@ -34,14 +34,15 @@ import kotlinx.coroutines.delay
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-// --- Sample weekly data model (replace with Room+Retrofit later) ---
+// --- Insights screen models and UI ---
 
 /**
- * Immutable model used by the Insights screen to render a single day.
- * @param date calendar day
- * @param mood mood score (1..5)
- * @param minutes exercise minutes
- * @param tempC daily average temperature in °C
+ * Immutable model for a single day on the Insights screen.
+ *
+ * @param date   Calendar date (local).
+ * @param mood   Mood score in the range 1..5.
+ * @param minutes Exercise duration in minutes.
+ * @param tempC  Average ambient temperature (°C).
  */
 data class DayInsight(
     val date: LocalDate,
@@ -50,6 +51,13 @@ data class DayInsight(
     val tempC: Int
 )
 
+/**
+ * InsightsScreen
+ *
+ * Shows weekly aggregates, two compact charts (mood trend; minutes vs weather),
+ * and a context-based suggestion. Observes [InsightsViewModel.uiState] with
+ * lifecycle awareness and renders loading/empty/data states.
+ */
 @Composable
 fun InsightsScreen(
     viewModel: InsightsViewModel = viewModel()
@@ -78,6 +86,12 @@ fun InsightsScreen(
     }
 }
 
+/**
+ * InsightsContent
+ *
+ * Renders summary cards, two charts, and a text tip based on the current week.
+ * Input list should contain the last seven days (or fewer).
+ */
 @Composable
 private fun InsightsContent(week: List<DayInsight>) {
     val moodsWithData = week.filter { it.mood > 0 }
@@ -142,6 +156,9 @@ private fun InsightsContent(week: List<DayInsight>) {
     }
 }
 
+/**
+ * Builds a simple text suggestion based on weekly minutes, temperature, and mood.
+ */
 private fun buildSuggestion(week: List<DayInsight>): String {
     val avgTemp = week.map { it.tempC }.average()
     val totalMin = week.sumOf { it.minutes }
@@ -159,6 +176,9 @@ private fun buildSuggestion(week: List<DayInsight>): String {
     }
 }
 
+/**
+ * Small metric card (label + value) used in the summary row.
+ */
 @Composable
 private fun StatCard(
     label: String,
@@ -180,6 +200,9 @@ private fun StatCard(
     }
 }
 
+/**
+ * Standard container for a chart: title + padded content.
+ */
 @Composable
 private fun ChartCard(title: String, content: @Composable () -> Unit) {
     Card(
@@ -197,9 +220,14 @@ private fun ChartCard(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * MoodLineChart
+ *
+ * Displays a 1..5 trend line with dots at each day and faint grid lines.
+ * Assumes [data] and [labels] are aligned and of equal length.
+ */
 @Composable
 private fun MoodLineChart(data: List<Int>, labels: List<String>) {
-    // This will ensure that the 0-point data point is plotted on the bottom axis
     val minY = 0f
     val maxY = 5f
     val points = data.map { it.toFloat() }
@@ -212,9 +240,11 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
         val top = 12f
         val bottom = h - 28f
 
+        // Axes
         drawLine(Color.LightGray, Offset(left, top), Offset(left, bottom), 2f)
         drawLine(Color.LightGray, Offset(left, bottom), Offset(right, bottom), 2f)
 
+        // Grid (1..5)
         (1..5).forEach { y ->
             val yy = bottom - (y - minY) / (maxY - minY) * (bottom - top)
             drawLine(Color(0xFFE0E0E0), Offset(left, yy), Offset(right, yy), 1f)
@@ -222,6 +252,7 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
 
         val stepX = (right - left) / (points.size - 1).coerceAtLeast(1)
 
+        // Polyline + points
         val path = Path()
         points.forEachIndexed { i, v ->
             val x = left + i * stepX
@@ -234,9 +265,9 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
             }
             drawCircle(Color(0xFF7E57C2), radius = 5f, center = Offset(x, y))
         }
-
         drawPath(path, Color(0xFF7E57C2), style = Stroke(width = 4f, cap = StrokeCap.Round))
 
+        // X labels
         val labelStep = stepX
         labels.forEachIndexed { i, s ->
             drawContext.canvas.nativeCanvas.apply {
@@ -255,7 +286,12 @@ private fun MoodLineChart(data: List<Int>, labels: List<String>) {
     }
 }
 
-
+/**
+ * ExerciseBarWithWeather
+ *
+ * Mixed bar/point chart: bars for minutes, dots for temperature. Labels appear
+ * beneath each column; temperature is annotated near the dot.
+ */
 @Composable
 private fun ExerciseBarWithWeather(
     minutes: List<Int>,
@@ -274,6 +310,7 @@ private fun ExerciseBarWithWeather(
         val top = 12f
         val bottom = h - 28f
 
+        // Axes
         drawLine(Color.LightGray, Offset(left, top), Offset(left, bottom), 2f)
         drawLine(Color.LightGray, Offset(left, bottom), Offset(right, bottom), 2f)
 
@@ -284,16 +321,19 @@ private fun ExerciseBarWithWeather(
             val x = left + i * barSpace + barSpace / 2f
             val barTop = bottom - (m / maxMin) * (bottom - top)
 
+            // Minutes bar
             drawRect(
                 color = Color(0xFFB39DDB),
                 topLeft = Offset(x - bw / 2f, barTop),
                 size = androidx.compose.ui.geometry.Size(bw, bottom - barTop)
             )
 
+            // Temperature dot
             val t = temps[i]
             val ty = bottom - (t / maxTemp) * (bottom - top)
             drawCircle(Color(0xFF455A64), radius = 5f, center = Offset(x, ty))
 
+            // X label
             drawContext.canvas.nativeCanvas.apply {
                 drawText(
                     labels[i],
@@ -307,6 +347,7 @@ private fun ExerciseBarWithWeather(
                 )
             }
 
+            // Temperature annotation
             drawContext.canvas.nativeCanvas.apply {
                 drawText(
                     "${t}°",
@@ -323,5 +364,8 @@ private fun ExerciseBarWithWeather(
     }
 }
 
+/**
+ * Returns the localized short name for a day of week.
+ */
 private fun DayOfWeek.shortName(): String =
     getDisplayName(TextStyle.SHORT, Locale.getDefault())

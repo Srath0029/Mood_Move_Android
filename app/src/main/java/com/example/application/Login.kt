@@ -56,6 +56,7 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -186,7 +187,6 @@ fun LoginScreen(
             // ===== Email/Password Sign-in =====
             Button(
                 onClick = {
-                    // Basic syntactic validation (semantic checks occur server-side).
                     if (email.isBlank() || password.isBlank()) {
                         error = "Email and password are required."
                         return@Button
@@ -198,12 +198,14 @@ fun LoginScreen(
                             Firebase.auth
                                 .signInWithEmailAndPassword(email.trim(), password)
                                 .await()
+
+                            // ✅ Wait for AuthRepository to update
+                            AuthRepository.isLoggedIn.first { it == true }
+
                             snack.showSnackbar("Signed in successfully")
-                            // Small delay so users see the confirmation before navigation.
-                            delay(800)
+                            delay(500) // Reduced delay
                             onLoggedIn()
                         } catch (e: Exception) {
-                            // Map common Firebase Auth errors to friendly messages.
                             error = when (e) {
                                 is FirebaseAuthInvalidUserException ->
                                     "No account found for this email."
@@ -222,6 +224,7 @@ fun LoginScreen(
             Spacer(Modifier.height(10.dp))
 
             // ===== Google Sign-in (Credential Manager → Firebase) =====
+// ===== Google Sign-in =====
             OutlinedButton(
                 onClick = {
                     loading = true
@@ -230,16 +233,13 @@ fun LoginScreen(
                         try {
                             val idToken = getGoogleIdToken(ctx)
                             if (idToken == null) {
-                                // No available Google account/credential on device.
                                 error = "No Google account/credential found. " +
                                         "Add a Google account on this device and try again."
                             } else {
-                                // Exchange Google ID token for a Firebase credential.
                                 val credential = GoogleAuthProvider.getCredential(idToken, null)
                                 val result = Firebase.auth.signInWithCredential(credential).await()
                                 val user = result.user
 
-                                // Upsert a minimal user profile (merge to avoid clobbering fields).
                                 user?.let {
                                     val doc = mapOf(
                                         "uid" to it.uid,
@@ -253,13 +253,13 @@ fun LoginScreen(
                                         .set(doc, SetOptions.merge())
                                         .await()
                                 }
+                                AuthRepository.isLoggedIn.first { it == true }
 
                                 snack.showSnackbar("Signed in with Google")
-                                delay(800)
+                                delay(500)
                                 onLoggedIn()
                             }
                         } catch (e: Exception) {
-                            // Most issues are provider config, network, or user cancellation.
                             error = e.localizedMessage ?: "Google sign-in failed."
                         } finally {
                             loading = false

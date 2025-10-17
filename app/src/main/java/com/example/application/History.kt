@@ -46,10 +46,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.TextFieldDefaults
 
-
-
-
-/** Model of a single historical log item shown in the list. */
+/**
+ * LogEntry
+ *
+ * Row model for the History list and edit/view dialogs.
+ *
+ * @property id         Stable identifier.
+ * @property dateMillis UTC epoch millis representing the activity day.
+ * @property mood       1..5 scale rendered by [MoodBadge].
+ * @property type       Activity label (e.g., "Run", "Yoga").
+ * @property minutes    Duration in minutes, used for sorting.
+ * @property startTime  "HH:mm" start time string.
+ * @property endTime    "HH:mm" end time string.
+ */
 data class LogEntry(
     val id: String,
     val dateMillis: Long,
@@ -60,7 +69,11 @@ data class LogEntry(
     val endTime: String
 )
 
-/** Sorting options for the history list. */
+/**
+ * SortOption
+ *
+ * Available sort orders for the History list.
+ */
 private enum class SortOption(val label: String) {
     NEWEST("Newest"),
     OLDEST("Oldest"),
@@ -69,6 +82,9 @@ private enum class SortOption(val label: String) {
 
 private val activityTypes = listOf("Walk", "Run", "Cycling", "Yoga", "Strength", "Stretching")
 
+/**
+ * Disallows future dates in the date pickers.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 private object NotInTheFutureSelectableDates : SelectableDates {
     override fun isSelectableDate(utcTimeMillis: Long): Boolean {
@@ -76,6 +92,10 @@ private object NotInTheFutureSelectableDates : SelectableDates {
     }
 }
 
+/**
+ * Allows selecting dates from [fromMillis] up to today.
+ * If [fromMillis] is null, selection is disabled.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 private class ToDateSelectableDates(private val fromMillis: Long?) : SelectableDates {
     override fun isSelectableDate(utcTimeMillis: Long): Boolean {
@@ -88,7 +108,20 @@ private class ToDateSelectableDates(private val fromMillis: Long?) : SelectableD
     }
 }
 
-
+/**
+ * HistoryScreen
+ *
+ * Displays the user's exercise logs with:
+ * - Text search (activity type/date),
+ * - Date range filtering (From/To),
+ * - Sorting (Newest/Oldest/Longest),
+ * - Row actions (View/Edit/Delete).
+ *
+ * State & effects
+ * - Observes [HistoryViewModel.uiState] with lifecycle awareness.
+ * - Shows loading spinner, empty state, or a list based on data.
+ * - Opens dialogs for view, edit, and delete confirmations.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
@@ -123,6 +156,7 @@ fun HistoryScreen(
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().format(dateFmt)
         } ?: "Any"
 
+    // Derived list based on search, date range, and sort.
     val filteredSorted = remember(query, fromMillis, toMillis, sort, uiState.logs) {
         uiState.logs
             .asSequence()
@@ -218,6 +252,7 @@ fun HistoryScreen(
         }
     }
 
+    // From date picker
     if (fromOpen) {
         DatePickerDialog(
             onDismissRequest = { fromOpen = false },
@@ -234,6 +269,7 @@ fun HistoryScreen(
         ) { DatePicker(state = fromState, showModeToggle = true) }
     }
 
+    // To date picker
     if (toOpen) {
         DatePickerDialog(
             onDismissRequest = { toOpen = false },
@@ -247,6 +283,7 @@ fun HistoryScreen(
         ) { DatePicker(state = toState, showModeToggle = true) }
     }
 
+    // View dialog
     viewing?.let { e ->
         AlertDialog(
             onDismissRequest = { viewing = null },
@@ -263,7 +300,7 @@ fun HistoryScreen(
         )
     }
 
-    // --- Delete confirmation pop-up logic ---
+    // Delete confirmation
     deleting?.let { entryToDelete ->
         AlertDialog(
             onDismissRequest = { deleting = null },
@@ -291,6 +328,7 @@ fun HistoryScreen(
         )
     }
 
+    // Edit dialog
     editing?.let { entryToEdit ->
         EditLogDialog(
             logEntry = entryToEdit,
@@ -303,7 +341,13 @@ fun HistoryScreen(
     }
 }
 
-
+/**
+ * EditLogDialog
+ *
+ * In-place editing of a single log entry with validation:
+ * - mood must be 1..5
+ * - end time cannot be before start time and is capped at +1 hour
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditLogDialog(
@@ -505,7 +549,12 @@ private fun EditLogDialog(
     }
 }
 
-
+/**
+ * TimePickerDialog
+ *
+ * Wrapper around the platform dialog that returns a "HH:mm" time string.
+ * Dismissal is wired via `setOnDismissListener`.
+ */
 @Composable
 private fun TimePickerDialog(
     initialTime: String,
@@ -540,7 +589,11 @@ private fun TimePickerDialog(
     }
 }
 
-
+/**
+ * HistoryRow
+ *
+ * Card row for a single log entry with quick actions (view, edit, delete).
+ */
 @Composable
 private fun HistoryRow(
     entry: LogEntry,
@@ -580,6 +633,11 @@ private fun HistoryRow(
     }
 }
 
+/**
+ * MoodBadge
+ *
+ * Displays a mood label (1..5) with a color-coded background.
+ */
 @Composable
 private fun MoodBadge(mood: Int) {
     val label = when (mood) {
@@ -606,6 +664,16 @@ private fun MoodBadge(mood: Int) {
     )
 }
 
+/**
+ * SortMenu
+ *
+ * Compact dropdown for selecting a [SortOption].
+ *
+ * @param current  Currently selected option.
+ * @param onChange Emits the selected option.
+ * @param modifier Placement of the control in parent layouts.
+ * @param height   Button height to align with sibling controls.
+ */
 @Composable
 private fun SortMenu(
     current: SortOption,
@@ -634,6 +702,9 @@ private fun SortMenu(
     }
 }
 
+/**
+ * Formats epoch millis as "yyyy-MM-dd" in the device time zone, or "Any" if null.
+ */
 private fun formatDateOnly(ms: Long?): String {
     if (ms == null) return "Any"
     return Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()

@@ -17,12 +17,28 @@ import java.time.Duration
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
+/**
+ * UI state for the History screen.
+ *
+ * @property isLoading True while data is being fetched or the listener is attaching.
+ * @property logs      View-ready rows mapped from Firestore documents.
+ * @property error     Terminal or transient error message, if any.
+ */
 data class HistoryUiState(
     val isLoading: Boolean = true,
     val logs: List<LogEntry> = emptyList(),
     val error: String? = null
 )
 
+/**
+ * HistoryViewModel
+ *
+ * Responsibilities
+ * - Observe FirebaseAuth to react to sign-in/sign-out and (re)attach a Firestore listener.
+ * - Stream user-scoped logs from Firestore and expose them as [HistoryUiState].
+ * - Provide basic mutations (delete/update) and duration calculation.
+ * - Release listeners in [onCleared] to avoid leaks.
+ */
 class HistoryViewModel : ViewModel() {
 
     private val db = Firebase.firestore
@@ -31,34 +47,38 @@ class HistoryViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(HistoryUiState())
     val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
 
-
     private var logsListener: ListenerRegistration? = null
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
 
     init {
-        // 2. When ViewModel is created, it no longer loads data directly, but starts monitoring the user's login status
+        // Defer data loading to auth state; attach on creation so the VM reacts immediately.
         createAuthStateListener()
     }
 
+    /**
+     * Subscribes to FirebaseAuth state changes and starts/stops the logs listener accordingly.
+     * Keeps exactly one active Firestore listener scoped to the current user.
+     */
     private fun createAuthStateListener() {
         authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
-                // If the user is logged in, start monitoring the user's database records
                 Log.d("HistoryViewModel", "Auth state changed: User logged in (${user.uid})")
                 startLogsListener(user.uid)
             } else {
-                // If the user exits, stop all monitoring and clear the UI
                 Log.d("HistoryViewModel", "Auth state changed: User logged out")
                 stopLogsListener()
             }
         }
-        // Attach the listener to the auth instance
         auth.addAuthStateListener(authStateListener!!)
     }
 
+    /**
+     * Starts a Firestore snapshot listener for the given user.
+     * Removes any existing listener before attaching a new one.
+     */
     private fun startLogsListener(userId: String) {
-        // Before starting a new monitor, make sure the old monitor has been removed to prevent duplicate monitoring
+        // Prevent duplicate listeners when auth state changes quickly.
         logsListener?.remove()
 
         _uiState.update { it.copy(isLoading = true) }
@@ -93,19 +113,27 @@ class HistoryViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Stops the Firestore snapshot listener and clears the list in UI state.
+     * Called when the user signs out or when the VM needs to reset.
+     */
     private fun stopLogsListener() {
-        // Stop database monitoring
         logsListener?.remove()
-        // Reset the UI state to "not logged in"
         _uiState.update { HistoryUiState(isLoading = false, logs = emptyList()) }
     }
 
+    /**
+     * Deletes a log document by id.
+     */
     fun deleteLog(logId: String) {
         db.collection("logs").document(logId).delete()
             .addOnSuccessListener { Log.d("HistoryViewModel", "DocumentSnapshot successfully deleted!") }
             .addOnFailureListener { e -> Log.w("HistoryViewModel", "Error deleting document", e) }
     }
 
+    /**
+     * Updates selected fields on a log document.
+     */
     fun updateLog(
         logId: String,
         newDateMillis: Long,
@@ -127,6 +155,10 @@ class HistoryViewModel : ViewModel() {
             .addOnFailureListener { e -> Log.w("HistoryViewModel", "Error updating document", e) }
     }
 
+    /**
+     * Converts "HH:mm" strings to minutes between start and end.
+     * Returns 0 on parse errors or null inputs.
+     */
     private fun calculateDuration(startTimeStr: String?, endTimeStr: String?): Int {
         if (startTimeStr == null || endTimeStr == null) return 0
         return try {
@@ -139,10 +171,11 @@ class HistoryViewModel : ViewModel() {
         }
     }
 
-    // This method will be called automatically when the ViewModel is destroyed
+    /**
+     * Lifecycle cleanup: remove listeners to avoid memory leaks.
+     */
     override fun onCleared() {
         super.onCleared()
-        // All listeners must be removed here to prevent memory leaks
         authStateListener?.let { auth.removeAuthStateListener(it) }
         logsListener?.remove()
         Log.d("HistoryViewModel", "ViewModel cleared and listeners removed.")
