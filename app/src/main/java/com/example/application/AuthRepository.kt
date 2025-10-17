@@ -63,16 +63,16 @@ object AuthRepository {
         weightKg: Int?,
         dobMillis: Long?
     ): Result<Unit> = runCatching {
-        // 1) Create user in Firebase Auth
+        //  Create user in Firebase Auth
         val authResult = auth.createUserWithEmailAndPassword(email, password).await()
         val user = authResult.user ?: error("No FirebaseUser returned")
         val uid = user.uid
 
-        // 2) Update display name (KTX DSL)
+        //  Update display name (KTX DSL)
         val profile = userProfileChangeRequest { displayName = name }
         user.updateProfile(profile).await()
 
-        // 3) Persist profile into Firestore: users/{uid}
+        //  Persist profile into Firestore: users/{uid}
         //    NOTE: Keep this document private via Firestore Security Rules.
         val doc = mapOf(
             "uid" to uid,
