@@ -1,53 +1,120 @@
-MoodMove: A Modern Android Health & Mood Tracker
-MoodMove is a sophisticated health and wellness tracking application for Android, built entirely with Jetpack Compose. It empowers users to log daily physical activities, monitor mood fluctuations, and gain actionable insights through rich data visualizations.
+🌤️ MoodMove: Android Health & Mood Tracker
+📄 Overview
+
+MoodMove is a modern, data-driven Android health and wellness app built entirely with Jetpack Compose and Firebase.
+It empowers users to track their physical activity, monitor mood fluctuations, and gain personalized insights through interactive visualizations — promoting sustainable wellbeing habits aligned with UN SDG 3: Good Health & Wellbeing.
+
+The application integrates context-aware logic, using both weather data and step-count activity logs, to understand how external conditions influence daily mood and motivation.
 
 ✨ Key Features
-The application is architected around four primary modules, supported by robust background services to deliver a seamless and reliable user experience.
+🏠 Home Dashboard
 
-Home Dashboard: A central hub providing quick navigation, today's date, and a "Week at a Glance" summary. It features a custom-drawn chart displaying the week's key metrics (average mood, total exercise duration, and average temperature).
+Displays today’s date and a “Week at a Glance” summary of mood, exercise, and weather.
 
-Dynamic Activity Feed: The home screen includes an auto-scrolling carousel that displays recent public activities from other users in the community (e.g., "Jane completed a Run 5 minutes ago"), enhancing user engagement.
+Features a custom-drawn chart visualizing weekly averages (mood, duration, temperature).
 
-Activity Logging: An intuitive interface for users to log new physical activities, including type, start/end times, mood score, and date.
+Includes a community feed carousel showing recent public activities (e.g., “Jane completed a run 5 min ago”).
 
-Comprehensive History: A searchable and filterable list of all past activity logs. Users can view, edit, or delete any historical entry through interactive dialogs.
+🏃 Activity Logging
 
-Data-Driven Insights: A dedicated screen that visualizes the user's weekly data using custom-drawn charts, including a mood trend line chart and a composite bar chart comparing exercise duration against weather conditions.
+Intuitive interface for adding new activities: type, duration, mood, and date.
 
-User & Preference Management: A settings screen for managing user profiles and application preferences.
+Validates entries and stores them securely in Firestore.
 
-Background Services
-Precise Reminders (AlarmManager): Users can enable daily "Hydration" and "Medication" reminders. The app leverages AlarmManager to schedule exact, time-critical alarms that trigger reliably, even when the device is idle.
+📜 History & Insights
 
-Intelligent Background Sync (WorkManager): A user-toggleable "Background Updates" feature schedules a periodic ContextIngestWorker. This worker intelligently fetches the user's location in the background, subject to constraints like network connectivity and battery level, and persists the data locally.
+Searchable list of all logged activities.
 
-🛠️ Tech Stack & Architecture
-This project is built with 100% Kotlin and adheres to modern Android development best practices recommended by Google.
+Edit or delete any record using interactive dialogs.
 
-UI Framework: Jetpack Compose for a fully declarative, modern UI.
+Dedicated Insights screen renders:
 
-Architecture:
+Mood trend line chart
 
-MVVM (Model-View-ViewModel): Enforces a clean separation of concerns between the UI layer, state management, and business logic.
+Composite bar chart comparing exercise duration vs. weather
 
-Repository Pattern: Abstracting data sources, providing a clean API for data access to the ViewModels.
+⚙️ User & Preferences
 
-Asynchronous Programming: Kotlin Coroutines are used extensively for all asynchronous operations, including database queries and network calls, ensuring a responsive, non-blocking UI.
+Manage profile information and app preferences (reminders, sync settings, etc.).
 
-Backend as a Service (BaaS):
+Seamless login/logout with Firebase Authentication.
 
-Firebase Authentication: Manages user registration, sign-in, sign-out, and password recovery.
+🔔 Background Services
+⏰ Precise Reminders (AlarmManager)
 
-Cloud Firestore: The primary cloud database for storing user profiles (users collection) and all activity logs (logs collection).
+Configurable daily “Hydration” and “Medication” reminders.
 
-Local Database: Room for persisting location data collected in the background by WorkManager.
+Uses AlarmManager to schedule exact, time-critical alarms that trigger even when idle.
 
-Background Processing:
+🔄 Intelligent Background Sync (WorkManager)
 
-WorkManager: For scheduling deferrable and guaranteed background tasks (location fetching).
+“Background Updates” toggle enables a ContextIngestWorker.
 
-AlarmManager: For scheduling exact, time-critical alarms (daily reminders).
+Worker fetches user location periodically (with constraints: network + battery).
 
-Networking: Retrofit for type-safe HTTP requests to communicate with third-party APIs like the OpenWeatherApi.
+Persists contextual data to a local Room database for later analytics.
 
-Navigation: Jetpack Navigation for Compose (Implicit).
+🧱 Tech Stack & Architecture
+Layer	Technology	Purpose
+Language	Kotlin (100%)	Modern Android language
+UI	Jetpack Compose	Declarative UI and state management
+Architecture	MVVM + Repository Pattern	Clear separation of concerns
+Database (Local)	Room	Persist background-collected data
+Backend (Cloud)	Firebase Auth + Firestore	User auth & activity data
+Background Tasks	WorkManager + AlarmManager	Scheduled jobs & reminders
+Networking	Retrofit + OpenWeatherAPI	Weather-based context awareness
+Navigation	Jetpack Navigation for Compose	Screen transitions
+🧠 Core Design Principles
+
+Reactive UI using Compose StateFlows.
+
+Clean Architecture ensuring testability and scalability.
+
+Non-blocking operations via Kotlin Coroutines.
+
+Seamless offline support with Room + Firestore caching.
+
+🧩 Folder Structure
+Mood_Move_Android/
+├── app/                   # Main Android app source
+│   ├── data/              # Repository & Room database
+│   ├── model/             # Data classes
+│   ├── ui/                # Jetpack Compose screens & components
+│   ├── viewmodel/         # MVVM ViewModels
+│   └── worker/            # WorkManager tasks (ContextIngestWorker)
+├── build.gradle.kts
+├── gradle.properties
+├── google-services.json
+└── README.md
+
+🌟 Highlights
+
+Modern Android Development: 100 % Jetpack Compose & Kotlin.
+
+Cloud-Connected: Firebase Auth + Firestore + OpenWeather API.
+
+Smart Background Services: WorkManager + AlarmManager integration.
+
+Interactive Data Visualizations: Custom-drawn charts and insights.
+
+User-Centric Design: Personalization, accessibility, and responsive UI.
+
+🚀 Future Improvements
+
+🤖 Add machine-learning mood predictions based on weather + activity.
+
+📈 Integrate Google Fit API for live step and heart-rate data.
+
+💬 Enable community sharing and friend leaderboards.
+
+🧘 Incorporate mindfulness reminders and stress-tracking features.
+
+☁️ Deploy Firestore triggers for cloud analytics automation.
+
+💡 Key Takeaways
+
+Demonstrates end-to-end Android app development with Compose.
+
+Integrates context awareness for holistic health tracking.
+
+Combines design, analytics, and cloud technologies into a cohesive wellbeing platform.
